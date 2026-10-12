@@ -93,6 +93,13 @@ def species_keys(cfg: dict) -> list[str]:
     return list(cfg["gatunki"].keys())
 
 
+def grid_signature(nodes: list) -> str:
+    """Podpis listy węzłów siatki – wiąże indeksy `g` w danych statycznych z siatka_pogody.json."""
+    import hashlib
+
+    return hashlib.sha1(json.dumps(nodes).encode()).hexdigest()[:16]
+
+
 def write_json(path: Path, obj) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     with open(tmp, "w", encoding="utf-8") as fh:

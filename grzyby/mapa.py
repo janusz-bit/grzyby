@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import shapely
 
-from .common import Paths, log, read_json, species_keys, write_json
+from .common import Paths, grid_signature, log, read_json, species_keys, write_json
 
 STOREY_LABELS = {"DRZEW": "", "IP": "I p.", "IIP": "II p.", "PRZES": "przestoje",
                  "PODRII": "podrost II p.", "PODR": "podrost"}
@@ -74,12 +74,14 @@ def _encode_geom(geom, scale: float, min_area_deg2: float) -> list:
     return polys
 
 
-def _site_names(paths: Paths) -> dict[str, str]:
+def _dictionaries(cfg: dict, paths: Paths) -> tuple[dict[str, str], dict[str, str]]:
+    """Nazwy typów siedliskowych i kategorii ochronności ze słowników BDL."""
     from .bdl import Package
     zips = sorted(paths.raw.glob("BDL_*.zip"))
-    pkg = Package(zips[0], ["utf-8", "cp1250"])
-    d = pkg.table("f_site_type_dic.txt")
-    return dict(zip(d["site_type_cd"], d["site_type_name"]))
+    pkg = Package(zips[0], cfg["dane"]["kodowanie_txt"])
+    st = pkg.table("f_site_type_dic.txt")
+    pc = pkg.table("f_prot_categ_dic.txt")
+    return dict(zip(st["site_type_cd"], st["site_type_name"])), dict(zip(pc["prot_category_cd"], pc["prot_category_name"]))
 
 
 def _idx(values: pd.Series) -> tuple[list[str], list[int]]:
@@ -109,7 +111,7 @@ def build_static(cfg: dict, paths: Paths, stands: gpd.GeoDataFrame, grid_idx: np
     df = df.loc[keep]
     geoms = [g for g, k in zip(geoms, keep) if k]
 
-    site_names = _site_names(paths)
+    site_names, prot_names = _dictionaries(cfg, paths)
     nadl, nadl_i = _idx(df["nadl"])
     area_codes, area_i = _idx(df["area_type_cd"])
     area_names = df.groupby("area_type_cd")["area_name"].first().reindex(area_codes).fillna("").tolist()
@@ -117,6 +119,7 @@ def build_static(cfg: dict, paths: Paths, stands: gpd.GeoDataFrame, grid_idx: np
     excl, excl_i = _idx(df["wykluczenie"])  # "" (dostępne) ma kod 0, bo sortuje się pierwsze
     assert excl[0] == "", excl
     prot, prot_i = _idx(df["prot"])
+    warn, warn_i = _idx(df["ostrzezenie"])
 
     comp = []
     for s in df["composition"].fillna("[]"):
@@ -124,27 +127,30 @@ def build_static(cfg: dict, paths: Paths, stands: gpd.GeoDataFrame, grid_idx: np
         for st, sp, part, age, h in json.loads(s):
             flat += [st, sp, part, age, h]
         comp.append(flat)
+    # udziały gatunków ważone wagą piętra (te same, które liczy model) -> [kod, %, kod, %, ...]
+    ws = []
+    for s in df["udzialy"].fillna("[]"):
+        u = json.loads(s)
+        ws.append([v if i % 2 == 0 else round(v * 100) for i, v in enumerate(u)])
 
     feats = {
         "geom": geoms,
         "n": nadl_i, "adr": df["adres"].tolist(), "area": area_i, "site": site_i, "prot": prot_i,
         "ha": _ints(df["area_ha"], 100), "ex": excl_i, "g": df["g"].astype(int).tolist(),
         "age": _ints(df["lead_age"]), "hgt": _ints(df["top_height"]), "lead": df["lead_species"].fillna("").tolist(),
-        "comp": comp,
+        "comp": comp, "ws": ws, "warn": warn_i,
     }
-    for k in keys:
-        feats[f"p_{k}"] = _ints(df[f"p_{k}"], 100, 0)
-        feats[f"hs_{k}"] = _ints(df[f"hs_{k}"], 100, 0)
-        feats[f"af_{k}"] = _ints(df[f"af_{k}"], 100, 0)
-        feats[f"hz_{k}"] = _ints(df[f"hz_{k}"], 100, 0)
-        feats[f"sf_{k}"] = _ints(df[f"sf_{k}"], 100, 0)
+    for k in keys:  # składniki potencjału ×100 (opis w habitat.host_scores)
+        for c in ("p", "hs", "uf", "af", "hz", "sf"):
+            feats[f"{c}_{k}"] = _ints(df[f"{c}_{k}"], 100, 0)
 
     payload = {
         "skala_wsp": scale,
         "nadl": nadl,
         "rodzaje": area_codes, "rodzaje_nazwy": area_names,
         "siedliska": site_codes, "siedliska_nazwy": [site_names.get(c, "") for c in site_codes],
-        "wykluczenia": excl, "ochronnosc": prot,
+        "wykluczenia": excl, "ostrzezenia": warn,
+        "ochronnosc": [", ".join(prot_names.get(c, c) for c in p.split(",")) if p else "" for p in prot],
         "pietra": STOREY_LABELS,
         "f": feats,
     }
@@ -154,7 +160,9 @@ def build_static(cfg: dict, paths: Paths, stands: gpd.GeoDataFrame, grid_idx: np
     bounds = [round(v, 4) for v in df.total_bounds]
     write_json(paths.static_payload, {
         "zbudowano": dt.datetime.now().isoformat(timespec="minutes"),
-        "liczba": len(df), "granice": bounds, "b64": b64,
+        "liczba": len(df), "granice": bounds,
+        "siatka_podpis": grid_signature(read_json(paths.grid)["wezly"]),
+        "b64": b64,
     })
     log(f"mapa: dane statyczne {len(raw) / 1e6:.1f} MB JSON -> {len(gz) / 1e6:.1f} MB gzip "
         f"-> {len(b64) / 1e6:.1f} MB base64 ({len(df)} wydzieleń)")
@@ -169,7 +177,15 @@ def _species_meta(cfg: dict) -> list[dict]:
 
 def _script_json(obj) -> str:
     # bezpieczne osadzenie JSON w <script>
-    return json.dumps(obj, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+    return (json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+            .replace("</", "<\\/").replace("<!--", "<\\!--"))
+
+
+def _exclusion_reasons(cfg: dict) -> list[str]:
+    ex = cfg["wykluczenia"]
+    return [*ex["funkcje_lasu"].values(), *ex["kategorie_ochronnosci"].values(),
+            *ex.get("rodzaje_powierzchni", {}).values(),
+            f"uprawa leśna (do {ex['uprawa_max_wysokosc_m']} m) – stały zakaz wstępu", "powierzchnia nieleśna"]
 
 
 def render(cfg: dict, paths: Paths) -> None:
@@ -177,6 +193,9 @@ def render(cfg: dict, paths: Paths) -> None:
     static = read_json(paths.static_payload)
     weather = read_json(paths.weather_index)
     grid = read_json(paths.grid)
+    if static.get("siatka_podpis") != grid_signature(grid["wezly"]):
+        raise SystemExit("dane statyczne mapy i siatka pogody pochodzą z różnych przebiegów – "
+                         "uruchom pełny pipeline (nix run .#mapa)")
     gbif = read_json(paths.gbif_report) if paths.gbif_report.exists() else {"punkty": [], "gatunki": {}}
     meta = {
         "gatunki": _species_meta(cfg),
@@ -194,8 +213,12 @@ def render(cfg: dict, paths: Paths) -> None:
         },
         "prog_wysoki": cfg["gbif"]["prog_wysoki"],
         "drzewostan": cfg["drzewostan"],
+        "wykluczenia_lista": _exclusion_reasons(cfg),
     }
     tpl = resources.files("grzyby").joinpath("szablon.html").read_text(encoding="utf-8")
+    for ph in ("{{MAPLIBRE}}", "/*{{META}}*/null", "/*{{POGODA}}*/null", "/*{{GBIF}}*/null", "{{DANE_B64}}"):
+        if ph not in tpl:
+            raise RuntimeError(f"szablon.html: brak znacznika {ph}")
     v = mc["maplibre_wersja"]
     out = (tpl
            .replace("{{MAPLIBRE}}", html.escape(v))

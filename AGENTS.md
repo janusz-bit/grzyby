@@ -44,12 +44,15 @@ i wnioski z rozpoznania danych są w `README.md`, a pierwotne wymagania w `PLAN.
 ## Niezmienniki – pilnuj ich przy zmianach
 
 - **Format payloadu**: `mapa.build_static` (Python) i funkcje `geojson()`/`popupHtml()` w
-  `szablon.html` (JS) muszą zgadzać się co do kluczy w `D.f` (`geom`, `p_<gatunek>`, `hs_`, `af_`,
-  `hz_`, `sf_`, `comp` po 5 pól na gatunek itd.). Zmieniasz jedną stronę, zmień drugą.
+  `szablon.html` (JS) muszą zgadzać się co do kluczy w `D.f`: `geom`, `comp` (po 5 pól na wiersz
+  składu), `ws` (pary kod–udział ważony w %), `warn`, a na gatunek `p_`, `hs_`, `uf_`, `af_`, `hz_`
+  i `sf_` (×100, znaczenie opisuje docstring `habitat.host_scores`). Zmieniasz jedną stronę, zmień
+  drugą. JS nie liczy modelu od nowa, tylko wyświetla liczby z Pythona.
 - **Szybkie odświeżenie pogody** (`etap pogoda`) nie może wczytywać `wydzielenia.gpkg`. Korzysta
   tylko z `data/work/mapa_statyczne.json` i `siatka_pogody.json`. Indeks węzła siatki (`g`)
-  w payloadzie statycznym musi odpowiadać kolejności `wezly` w `siatka_pogody.json`. Gdy zmieniasz
-  siatkę, uruchom pełny pipeline.
+  w payloadzie statycznym musi odpowiadać kolejności `wezly` w `siatka_pogody.json`. Pilnuje tego
+  `siatka_podpis` (sprawdzany w `mapa.render`), a w pełnym pipeline siatka i dane statyczne są
+  zapisywane przed krokami sieciowymi.
 - **Kod wykluczenia 0 = dostępne**: `wykluczenia[0]` to pusty napis, a filtr warstw w JS zakłada
   `x == 0`.
 - **Wszystkie progi i reguły trzymaj w `config.yaml`**, nie w kodzie. Nowe parametry modelu opisuj

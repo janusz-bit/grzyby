@@ -1,6 +1,7 @@
 # Wszystkie progi i reguły modelu. Po zmianie:
 #   nix run .#mapa     – pełne przeliczenie (siedliska + pogoda + GBIF + mapa)
-#   nix run .#pogoda   – tylko pogoda i mapa (wystarczy po zmianie sekcji `pogoda` lub `sezon`)
+#   nix run .#pogoda   – tylko pogoda i mapa (wystarczy po zmianie sekcji `pogoda` – poza
+#                        `siatka_km` – albo `sezon` gatunków)
 #
 # Krzywe zapisane jako lista punktów [x, y] są interpolowane liniowo,
 # a poza zakresem przyjmują wartość skrajnego punktu.
@@ -16,7 +17,8 @@ dane:
 # --- Skład drzewostanu -------------------------------------------------------
 drzewostan:
   # Waga piętra przy liczeniu udziału żywiciela. Udziały w obrębie piętra sumują
-  # się do 10/10; piętra niewymienione (podszyt, nalot, zakrzewienia) są pomijane.
+  # się do 10/10 (poza PRZES – niżej); piętra niewymienione (podszyt, nalot,
+  # zakrzewienia) są pomijane.
   wagi_pieter:
     DRZEW: 1.0     # warstwa drzew (drzewostan jednopiętrowy)
     IP: 1.0        # piętro pierwsze
@@ -26,6 +28,16 @@ drzewostan:
     PODR: 0.15     # podrost
   udzial_mjs: 0.03 # kod MJS – „miejscami”, poniżej 5%
   udzial_pjd: 0.02 # kod PJD – „pojedynczo”, poniżej 5%
+  # Piętro PRZES (przestoje, nasienniki) w BDL nie ma kodów udziału. Udział gatunku
+  # liczymy z jego miąższości: miąższość / miąższość pełnego drzewostanu (mediana
+  # przestojów to ~8 m³/ha, czyli ~3%). Gdy brak miąższości – stała wartość.
+  udzial_przestoje:
+    miazszosc_pelna_m3ha: 300
+    brak_miazszosci: 0.03
+  # Piętra, w których obecność żywiciela (nawet MJS/PJD) liczy się jako „domieszka”
+  # dla gatunków z parametrem `min_obecnosc`.
+  pietra_domieszki: [DRZEW, IP, IIP]
+  czynnik_wieku_brak: 0.5  # gdy BDL nie podaje wieku gatunku
 
 # Czynnik siedliska, gdy kodu siedliska nie ma w tabeli danego gatunku grzyba.
 domyslny_czynnik_siedliska: 0.4
@@ -33,9 +45,13 @@ domyslny_czynnik_siedliska: 0.4
 # --- Gatunki grzybów ---------------------------------------------------------
 # zywiciele:  kod gatunku drzewa z BDL -> waga (0–1). Najpierw szukany jest pełny
 #             kod (np. DB.C), potem rodzaj przed kropką (DB.S -> DB).
-# nasycenie:  ważony udział żywicieli (0–1), przy którym czynnik żywiciela = 1;
+# nasycenie:  ważony udział żywicieli (0–1), przy którym czynnik udziału = 1;
 #             mała wartość = wystarczy domieszka.
-# wiek:       krzywa [wiek_lat, czynnik] liczona dla wieku konkretnego żywiciela.
+# min_obecnosc: (opcjonalnie) minimalny czynnik udziału, gdy żywiciel występuje
+#             w piętrach `pietra_domieszki` choćby pojedynczo (MJS/PJD) – reguła
+#             „także jako domieszka”.
+# wiek:       krzywa [wiek_lat, czynnik] liczona dla wieku konkretnego żywiciela;
+#             mnoży czynnik udziału (czysty drzewostan żywiciela = sama krzywa wieku).
 # siedliska:  kod typu siedliskowego -> czynnik (0–1).
 # sezon:      miesiąc -> czynnik; brak miesiąca = poza sezonem (0).
 gatunki:
@@ -43,7 +59,7 @@ gatunki:
     nazwa: borowik szlachetny
     lacina: Boletus edulis
     gbif: [Boletus edulis]
-    zywiciele: {ŚW: 1.0, SO: 1.0, BK: 1.0, DB: 1.0, DB.C: 0.5, BRZ: 0.5, GB: 0.3, JD: 0.8}
+    zywiciele: {ŚW: 1.0, SO: 1.0, SO.WE: 0.5, BK: 1.0, DB: 1.0, DB.C: 0.5, BRZ: 0.5, GB: 0.3, JD: 0.8}
     nasycenie: 0.6
     wiek: [[0, 0], [10, 0.05], [20, 0.3], [40, 1.0]]
     siedliska: &bory_lasy_swieze
@@ -51,8 +67,8 @@ gatunki:
       BMŚW: 1.0
       LMŚW: 1.0
       LŚW: 1.0
-      BMW: 0.6
-      LMW: 0.6
+      BMW: 0.9          # plan: „bory mieszane, lasy mieszane” – wariant wilgotny lekko niżej
+      LMW: 0.9
       BW: 0.5
       LW: 0.4
       BS: 0.4
@@ -68,7 +84,7 @@ gatunki:
     nazwa: podgrzybek brunatny
     lacina: Imleria badia
     gbif: [Imleria badia]
-    zywiciele: {SO: 1.0, ŚW: 1.0, MD: 0.3}
+    zywiciele: {SO: 1.0, SO.WE: 0.7, ŚW: 1.0, MD: 0.3}
     nasycenie: 0.5
     wiek: [[0, 0], [10, 0.1], [20, 1.0]]
     siedliska:
@@ -95,6 +111,7 @@ gatunki:
     gbif: [Leccinum scabrum]
     zywiciele: {BRZ: 1.0}
     nasycenie: 0.3           # brzoza jako domieszka 30% wystarcza do pełnej wartości
+    min_obecnosc: 0.4        # brzoza choćby pojedynczo (MJS/PJD) – co najmniej 0,4 (umiarkowany)
     wiek: [[0, 0], [5, 0.5], [10, 1.0]]
     siedliska:
       BŚW: 1.0
@@ -120,6 +137,7 @@ gatunki:
     gbif: [Leccinum aurantiacum]
     zywiciele: {OS: 1.0, TP: 0.5}
     nasycenie: 0.2           # osika zwykle występuje jako domieszka
+    min_obecnosc: 0.4        # 85% wystąpień osiki w BDL to MJS/PJD
     wiek: [[0, 0], [5, 0.5], [10, 1.0]]
     siedliska:
       LŚW: 1.0
@@ -145,7 +163,7 @@ gatunki:
     gbif: [Suillus luteus]
     zywiciele: {SO: 1.0, SO.WE: 0.3}
     nasycenie: 0.6
-    wiek: [[0, 0], [5, 0.3], [10, 1.0], [30, 1.0], [50, 0.4], [80, 0.2]]
+    wiek: [[0, 0], [5, 0.3], [10, 1.0], [30, 1.0], [40, 0.5], [60, 0.2], [80, 0.1]]
     siedliska:
       BS: 1.0
       BŚW: 1.0
@@ -168,9 +186,9 @@ gatunki:
     nazwa: rydz (mleczaj rydz / świerkowy)
     lacina: Lactarius deliciosus / L. deterrimus
     gbif: [Lactarius deliciosus, Lactarius deterrimus]
-    zywiciele: {SO: 1.0, ŚW: 1.0}   # L. deliciosus z sosną, L. deterrimus ze świerkiem
+    zywiciele: {SO: 1.0, SO.WE: 0.0, ŚW: 1.0}   # L. deliciosus z sosnami dwuigielnymi, L. deterrimus ze świerkiem
     nasycenie: 0.5
-    wiek: [[0, 0], [5, 0.3], [10, 1.0], [30, 1.0], [50, 0.4], [80, 0.2]]
+    wiek: [[0, 0], [5, 0.3], [10, 1.0], [30, 1.0], [40, 0.5], [60, 0.2], [80, 0.1]]
     siedliska:
       BŚW: 1.0
       BMŚW: 1.0
@@ -193,7 +211,7 @@ gatunki:
     nazwa: pieprznik jadalny (kurka)
     lacina: Cantharellus cibarius
     gbif: [Cantharellus cibarius]
-    zywiciele: {SO: 1.0, ŚW: 1.0, BK: 1.0, DB: 1.0, DB.C: 0.3, GB: 0.3, BRZ: 0.3}
+    zywiciele: {SO: 1.0, SO.WE: 0.5, ŚW: 1.0, BK: 1.0, DB: 1.0, DB.C: 0.3, GB: 0.3, BRZ: 0.3}
     nasycenie: 0.6
     wiek: [[0, 0], [10, 0.1], [20, 1.0]]
     siedliska:              # ubogie, kwaśne siedliska borowe i mieszane
@@ -216,30 +234,44 @@ gatunki:
 
 # --- Wykluczenia („niedostępne”) ----------------------------------------------
 wykluczenia:
-  # funkcja lasu (f_subarea.forest_func_cd) -> opis
+  # Kolejność sekcji = priorytet, gdy wydzielenie spełnia kilka warunków.
+  # funkcja lasu (f_subarea.forest_func_cd) -> opis. Uproszczenie: zakładamy, że
+  # w każdym rezerwacie obowiązuje zakaz zbioru grzybów (art. 15 ustawy o ochronie
+  # przyrody), choć plan ochrony może zbiór dopuszczać.
   funkcje_lasu:
-    REZ: rezerwat przyrody
-    REZ CZ: rezerwat przyrody (ochrona częściowa)
-    REZ Ś: rezerwat przyrody (ochrona ścisła)
+    REZ: rezerwat przyrody – zakładany zakaz zbioru (sprawdź plan ochrony)
+    REZ CZ: rezerwat częściowy – zakładany zakaz zbioru (sprawdź plan ochrony)
+    REZ Ś: rezerwat ścisły – zakaz zbioru
   # kategoria ochronności (f_arod_category.prot_category_cd) -> opis.
-  # Art. 26 ust. 2 ustawy o lasach: stały zakaz wstępu do upraw do 4 m,
-  # powierzchni doświadczalnych, drzewostanów nasiennych i ostoi zwierząt.
+  # Art. 26 ust. 2 ustawy o lasach – stały zakaz wstępu do: 1) upraw do 4 m,
+  # 2) powierzchni doświadczalnych i drzewostanów nasiennych, 3) ostoi zwierząt,
+  # 4) źródlisk rzek i potoków, 5) obszarów zagrożonych erozją. Pkt 4–5 nie mają
+  # odpowiednika w BDL (OCH GLEB to las glebochronny – tylko ostrzeżenie niżej).
   kategorie_ochronnosci:
     OCH OSTOJ: ostoja zwierząt – stały zakaz wstępu
     OCH NAS: drzewostan nasienny – stały zakaz wstępu
     OCH BADAW: powierzchnia badawcza/doświadczalna – stały zakaz wstępu
-  # Uprawa: najwyższa wysokość gatunku w piętrze górnym (DRZEW/IP) <= próg.
-  # Gdy BDL nie podaje wysokości – wiek < próg wieku.
+  # rodzaj powierzchni (f_subarea.area_type_cd) -> opis
+  rodzaje_powierzchni:
+    PLANT NAS: plantacja nasienna – zakaz wstępu (baza nasienna, zwykle ogrodzona)
+    SZK LEŚNA: szkółka leśna – teren ogrodzony
+  # Uprawa: średnia wysokość piętra górnego (DRZEW/IP) ważona udziałami <= próg.
+  # Gdy BDL nie podaje wysokości – wiek gatunku panującego < próg wieku.
   uprawa_max_wysokosc_m: 4
   uprawa_max_wiek_lat: 10
   # Powierzchnie nieleśne: rodzaj powierzchni z flagą type_fl = 'N' w słowniku
   # f_area_type_dic (grunty rolne, wody, zabudowa, bagna, zadrzewienia...).
   nielesne_flaga: N
 
+# Kategorie ochronności pokazywane w popupie jako ostrzeżenie (bez wykluczania).
+ostrzezenia:
+  OCH OBR: las obronny – możliwy teren wojskowy/poligon; sprawdź zasady wstępu
+  OCH GLEB: las glebochronny – fragmenty mogą być oznakowane jako obszar zagrożony erozją (zakaz wstępu)
+
 # --- Pogoda (Open-Meteo) -----------------------------------------------------
 pogoda:
   url: https://api.open-meteo.com/v1/forecast
-  siatka_km: 5
+  siatka_km: 5                   # zmiana wymaga pełnego przeliczenia (nix run .#mapa)
   dni_wstecz: 30
   dni_prognozy: 7
   horyzonty_dni: [0, 3, 7]       # dziś, +3, +7
@@ -256,7 +288,7 @@ pogoda:
     krzywa_mm: [[0, 0.0], [15, 0.25], [40, 1.0]]   # <15 mm słabo, 15–40 rośnie, >40 pełna
     # Wysyp zwykle 7–14 dni po obfitym deszczu: premia, jeśli w tym oknie
     # suma z `okno_zdarzenia_dni` kolejnych dni przekroczyła próg.
-    wysyp_opoznienie_dni: [7, 14]
+    wysyp_opoznienie_dni: [7, 14]   # całe zdarzenie musi się mieścić w tym przedziale
     wysyp_okno_zdarzenia_dni: 2
     wysyp_prog_mm: 15
     wysyp_premia: 0.15

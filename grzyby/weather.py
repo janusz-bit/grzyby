@@ -62,7 +62,11 @@ def fetch(cfg: dict, paths: Paths, force: bool = False) -> dict:
     if paths.weather_raw.exists() and not force:
         cached = read_json(paths.weather_raw)
         age_h = (time.time() - cached["pobrano_ts"]) / 3600
-        if age_h < pc["cache_godzin"] and cached["wezly"] == nodes and cached["parametry"] == _params_sig(pc):
+        today = dt.datetime.now(ZoneInfo(pc["strefa_czasowa"])).date()
+        # cache sprzed północy nie obejmuje już „dziś + najdalszy horyzont”
+        same_day = cached["pobrano"][:10] == today.isoformat()
+        if (age_h < pc["cache_godzin"] and same_day and cached["wezly"] == nodes
+                and cached["parametry"] == _params_sig(pc)):
             log(f"pogoda z cache ({age_h:.1f} h temu); użyj --force, aby pobrać ponownie")
             return cached
 
@@ -156,11 +160,14 @@ def compute_index(raw: dict, cfg: dict, paths: Paths) -> dict:
             raise RuntimeError(f"prognoza za krótka dla horyzontu +{h} dni")
         p_win = P[:, max(0, D - o["okno_dni"] + 1): D + 1].sum(axis=1)
         rain = curve(p_win, o["krzywa_mm"])
-        # premia za obfity deszcz 7–14 dni wcześniej (początek wysypu)
+        # premia za obfity deszcz 7–14 dni wcześniej (początek wysypu): każde k-dniowe okno
+        # zdarzenia musi leżeć w całości w przedziale [D - lag_hi, D - lag_lo]
         k = o["wysyp_okno_zdarzenia_dni"]
         lag_lo, lag_hi = o["wysyp_opoznienie_dni"]
+        if k > lag_hi - lag_lo + 1:
+            raise ValueError("pogoda.opady: wysyp_okno_zdarzenia_dni dłuższe niż przedział wysyp_opoznienie_dni")
         ev_mm = np.zeros(len(P))
-        for end in range(D - lag_hi, D - lag_lo + 1):
+        for end in range(D - lag_hi + k - 1, D - lag_lo + 1):
             if end - k + 1 >= 0:
                 ev_mm = np.maximum(ev_mm, P[:, end - k + 1: end + 1].sum(axis=1))
         event = ev_mm >= o["wysyp_prog_mm"]
@@ -195,6 +202,7 @@ def compute_index(raw: dict, cfg: dict, paths: Paths) -> dict:
     out = {
         "pobrano": raw["pobrano"],
         "dzis": today.isoformat(),
+        "strefa": pc["strefa_czasowa"],
         "zrodlo": "Open-Meteo (open-meteo.com), CC BY 4.0",
         "horyzonty": horizons,
     }

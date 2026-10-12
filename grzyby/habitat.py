@@ -22,10 +22,11 @@ def _shares(ss: pd.DataFrame, cfg: dict) -> pd.Series:
     part = ss["part_cd_act"]
     share = to_num(part) / 10.0
     share = share.mask(part == "MJS", d["udzial_mjs"]).mask(part == "PJD", d["udzial_pjd"])
-    # Brak udziału: jedyny gatunek w piętrze = 100%, inaczej jak „pojedynczo”.
-    n_in_storey = ss.groupby(["arodes_int_num", "storey_cd"])["species_cd"].transform("size")
-    share = share.fillna(pd.Series(np.where(n_in_storey == 1, 1.0, d["udzial_pjd"]), index=ss.index))
-    return share
+    # PRZES nie ma kodów udziału – udział z miąższości gatunku
+    p = d["udzial_przestoje"]
+    vol_share = (ss["volume"] / p["miazszosc_pelna_m3ha"]).clip(upper=1.0).fillna(p["brak_miazszosci"])
+    share = share.mask((ss["storey_cd"] == "PRZES") & share.isna(), vol_share)
+    return share.fillna(d["udzial_pjd"])  # inne piętra bez kodu (w BDL 2026 nie występują)
 
 
 def _host_weight(codes: pd.Series, hosts: dict[str, float]) -> pd.Series:
@@ -39,6 +40,7 @@ def species_rows(pkg: Package, cfg: dict) -> pd.DataFrame:
     weights = cfg["drzewostan"]["wagi_pieter"]
     ss = ss[ss["storey_cd"].isin(weights.keys())].copy()
     ss["storey_w"] = ss["storey_cd"].map(weights).astype(float)
+    ss["volume"] = to_num(ss["volume"])
     ss["share"] = _shares(ss, cfg)
     ss["age"] = to_num(ss["species_age"])
     ss["height_m"] = to_num(ss["height"])
@@ -47,32 +49,61 @@ def species_rows(pkg: Package, cfg: dict) -> pd.DataFrame:
 
 
 def host_scores(ss: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    """Dla każdego wydzielenia i gatunku grzyba: udział żywicieli, czynnik wieku, wynik żywiciela."""
-    out = {}
+    """Dla każdego wydzielenia i gatunku grzyba (sufiksy kolumn = klucz gatunku):
+
+    hs – ważony udział żywicieli: Σ udział × waga piętra × waga żywiciela (może przekroczyć 1
+         przy kilku piętrach),
+    uf – czynnik udziału: min(1, hs / nasycenie), nie mniej niż min_obecnosc × waga żywiciela,
+         gdy żywiciel jest w piętrach domieszki,
+    af – czynnik wieku: krzywa wieku żywicieli uśredniona wagą ich udziału,
+    hz – czynnik żywiciela = uf × af (czysty drzewostan żywiciela = sama krzywa wieku).
+    """
+    d = cfg["drzewostan"]
+    ids = ss["arodes_int_num"]
     base = ss["share"] * ss["storey_w"]
+    in_mix = ss["storey_cd"].isin(d["pietra_domieszki"])
+    out = {}
     for key, sp in cfg["gatunki"].items():
         hw = _host_weight(ss["species_cd"], sp["zywiciele"])
-        af = pd.Series(curve(ss["age"].fillna(-1), sp["wiek"]), index=ss.index)
-        af = af.where(ss["age"].notna(), 0.5)
-        hs = (base * hw).groupby(ss["arodes_int_num"]).sum()
-        contrib = (base * hw * af).groupby(ss["arodes_int_num"]).sum()
-        out[f"hs_{key}"] = hs.clip(upper=1.0)                          # ważony udział żywicieli
-        out[f"af_{key}"] = (contrib / hs.where(hs > 0)).fillna(0.0)     # efektywny czynnik wieku
-        out[f"hz_{key}"] = (contrib / sp["nasycenie"]).clip(upper=1.0)  # żywiciel × wiek, z nasyceniem
+        age_f = pd.Series(curve(ss["age"].fillna(-1), sp["wiek"]), index=ss.index)
+        age_f = age_f.where(ss["age"].notna(), d["czynnik_wieku_brak"])
+        w = base * hw
+        hs = w.groupby(ids).sum()
+        af = ((w * age_f).groupby(ids).sum() / hs.where(hs > 0)).fillna(0.0)
+        uf = (hs / sp["nasycenie"]).clip(upper=1.0)
+        if sp.get("min_obecnosc"):
+            best = hw[in_mix].groupby(ids[in_mix]).max().reindex(hs.index).fillna(0.0)
+            uf = np.maximum(uf, sp["min_obecnosc"] * best)
+        out[f"hs_{key}"] = hs
+        out[f"uf_{key}"] = uf
+        out[f"af_{key}"] = af
+        out[f"hz_{key}"] = uf * af
     return pd.DataFrame(out)
 
 
 def stand_summary(ss: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    """Wiek/wysokość piętra górnego i zwarty zapis składu gatunkowego."""
+    """Wiek/wysokość piętra górnego, zwarty zapis składu i ważone udziały gatunków."""
     top = ss[ss["storey_cd"].isin(["DRZEW", "IP"])]
     g = top.groupby("arodes_int_num")
-    summary = pd.DataFrame({
-        "top_height": g["height_m"].max(),
-        "top_age": g["age"].max(),
-    })
+    # wysokość drzewostanu = średnia wysokość gatunków piętra górnego ważona udziałami
+    # (maksimum dawałoby 10% domieszki szybko rosnącej brzozy nad młodą uprawą)
+    hh = top[top["height_m"].notna()]
+    top_height = (hh["share"] * hh["height_m"]).groupby(hh["arodes_int_num"]).sum() / \
+        hh["share"].groupby(hh["arodes_int_num"]).sum()
+    # indeks = wszystkie wydzielenia ze składem (także zręby/sukcesje bez piętra DRZEW/IP)
+    summary = pd.DataFrame(index=pd.Index(ss["arodes_int_num"].unique(), name="arodes_int_num"))
+    summary["top_age"] = g["age"].max()
+    summary["top_height"] = top_height
     lead = top.sort_values(["arodes_int_num", "storey_cd", "rank"]).groupby("arodes_int_num").first()
     summary["lead_species"] = lead["species_cd"]
     summary["lead_age"] = lead["age"]
+
+    # udział gatunku ważony wagą piętra (to samo, co wchodzi do hs) – do uzasadnienia w popupie
+    wsp = (ss["share"] * ss["storey_w"]).groupby([ss["arodes_int_num"], ss["species_cd"]]).sum()
+    acc: dict[str, list] = {}
+    for (a, sp), v in wsp.items():
+        acc.setdefault(a, []).extend([sp, round(float(v), 3)])
+    summary["udzialy"] = pd.Series({k: json.dumps(v, ensure_ascii=False) for k, v in acc.items()})
 
     order = {k: i for i, k in enumerate(cfg["drzewostan"]["wagi_pieter"])}
     s2 = ss.assign(_o=ss["storey_cd"].map(order)).sort_values(["arodes_int_num", "_o", "rank"])
@@ -112,7 +143,7 @@ def load_package(pkg: Package, cfg: dict) -> gpd.GeoDataFrame:
     df["adres"] = df["adr_for"].map(clean_address)
     keep = ["nadl_code", "nadl", "a_i_num", "adres", "area_type_cd", "area_name", "type_fl",
             "site_type_cd", "forest_func_cd", "prot", "area_ha", "top_height", "top_age",
-            "lead_species", "lead_age", "composition", *hs.columns, "geometry"]
+            "lead_species", "lead_age", "composition", "udzialy", *hs.columns, "geometry"]
     log(f"{pkg.code} {name}: {len(df)} wydzieleń z geometrią, {len(ss)} wierszy składu")
     return gpd.GeoDataFrame(df[keep], geometry="geometry", crs=geo.crs)
 
@@ -137,15 +168,19 @@ def apply_exclusions(df: pd.DataFrame, cfg: dict) -> None:
         mark(df["forest_func_cd"] == code, text)
     prot_lists = df["prot"].str.split(",")
     for code, text in ex["kategorie_ochronnosci"].items():
-        mark(prot_lists.map(lambda xs: code in xs), text)
+        mark(prot_lists.map(lambda xs, c=code: c in xs), text)
+    for code, text in ex.get("rodzaje_powierzchni", {}).items():
+        mark(df["area_type_cd"] == code, text)
     has_stand = df["top_age"].notna()
     young = np.where(df["top_height"].notna(),
                      df["top_height"] <= ex["uprawa_max_wysokosc_m"],
-                     df["top_age"] < ex["uprawa_max_wiek_lat"])
+                     df["lead_age"] < ex["uprawa_max_wiek_lat"])
     mark(has_stand & young & (df["type_fl"] != ex["nielesne_flaga"]),
          f"uprawa leśna (do {ex['uprawa_max_wysokosc_m']} m) – stały zakaz wstępu")
     mark(df["type_fl"] == ex["nielesne_flaga"], "powierzchnia nieleśna")
     df["wykluczenie"] = reason
+    warn = cfg.get("ostrzezenia", {})
+    df["ostrzezenie"] = prot_lists.map(lambda xs: " · ".join(warn[c] for c in xs if c in warn))
 
 
 def build(cfg: dict, paths: Paths) -> gpd.GeoDataFrame:

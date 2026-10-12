@@ -109,7 +109,8 @@ def evaluate(cfg: dict, paths: Paths, stands: gpd.GeoDataFrame, rows: list[dict]
             "odsetek_wysoki_wewnatrz": share_high(strict),
             "odsetek_wysoki_z_buforem": obs_share,
             "odsetek_powierzchni_wysoki": round(base_share, 3),
-            "lift": None if not obs_share or base_share == 0 else round(obs_share / base_share, 2),
+            "lift": None if obs_share is None or base_share == 0 else round(obs_share / base_share, 2),
+            "mala_proba": len(matched) < 10,
             "sredni_potencjal_obserwacji": None if matched.empty else round(float(matched[f"p_{k}"].mean()), 3),
             "sredni_potencjal_lasu": round(float(np.average(forest[f"p_{k}"], weights=area)), 3),
         }

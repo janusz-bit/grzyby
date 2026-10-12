@@ -6,7 +6,7 @@ import argparse
 import time
 
 from . import gbif, habitat, mapa, rozpoznanie, weather, zrzut
-from .common import Paths, load_config, log
+from .common import Paths, load_config, log, read_json
 
 
 def full(cfg: dict, paths: Paths, force_weather: bool) -> None:
@@ -14,12 +14,23 @@ def full(cfg: dict, paths: Paths, force_weather: bool) -> None:
     stands = habitat.build(cfg, paths)
     pts = stands.geometry.representative_point()
     grid_idx = weather.build_grid(pts.get_coordinates().to_numpy(), cfg, paths)
-    weather.run(cfg, paths, force=force_weather)
-    rows = gbif.fetch(cfg, paths, stands)
-    gbif.evaluate(cfg, paths, stands, rows)
+    # siatka i dane statyczne zapisywane razem, zanim zaczną się kroki sieciowe
     mapa.build_static(cfg, paths, stands, grid_idx)
+    weather.run(cfg, paths, force=force_weather)
+    try:
+        gbif.evaluate(cfg, paths, stands, gbif.fetch(cfg, paths, stands))
+    except Exception as e:  # warstwa GBIF jest opcjonalna – mapa powstaje i bez niej
+        log(f"GBIF niedostępny ({e}); mapa bez warstwy obserwacji")
+        paths.gbif_report.unlink(missing_ok=True)
     mapa.render(cfg, paths)
     zrzut.run(cfg, paths)
+
+
+def check_grid(cfg: dict, paths: Paths) -> None:
+    if not paths.static_payload.exists() or not paths.grid.exists():
+        raise SystemExit("brak danych statycznych – najpierw uruchom pełny pipeline (nix run .#mapa)")
+    if read_json(paths.grid)["krok_m"] != cfg["pogoda"]["siatka_km"] * 1000.0:
+        raise SystemExit("zmieniono pogoda.siatka_km – uruchom pełny pipeline (nix run .#mapa)")
 
 
 def main() -> None:
@@ -36,8 +47,7 @@ def main() -> None:
     if a.etap == "wszystko":
         full(cfg, paths, a.force)
     elif a.etap == "pogoda":
-        if not paths.static_payload.exists() or not paths.grid.exists():
-            raise SystemExit("brak danych statycznych – najpierw uruchom pełny pipeline (python -m grzyby)")
+        check_grid(cfg, paths)
         weather.run(cfg, paths, force=a.force)
         mapa.render(cfg, paths)
     elif a.etap == "rozpoznanie":

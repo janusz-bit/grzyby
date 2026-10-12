@@ -142,25 +142,36 @@ class DevTools:
         return out
 
 
+def click(dt: DevTools, x: float, y: float) -> None:
+    for typ in ("mouseMoved", "mousePressed", "mouseReleased"):
+        dt.call("Input.dispatchMouseEvent", type=typ, x=x, y=y, button="left", clickCount=1)
+
+
 # Sprawdzenia wykonywane w stronie po wyrenderowaniu
 CHECK_JS = """(() => {
   const r = id => map.queryRenderedFeatures({layers: [id]}).length;
-  return {pot: r('pot'), wyk: r('wyk'), wydzielen: F.geom.length, wezlow: POGODA.wezly.length,
-          zoom: map.getZoom(), dzien: POGODA.horyzonty[state.dzien].data};
+  return {pot: r('pot'), wyk: r('wyk'), wydzielen: F.g.length, wezlow: POGODA.wezly.length,
+          zoom: map.getZoom(), dzien: POGODA.horyzonty[state.dzien].data,
+          nakladka: getComputedStyle(document.getElementById('ladowanie')).display};
 })()"""
 
 POPUP_JS = """(async () => {
   map.jumpTo({center: %s, zoom: 13});
   await new Promise(r => map.once('idle', r));
-  // szukamy piksela w środkowej części ekranu, pod którym leży wydzielenie o najwyższym potencjale
+  // dwa piksele w prawej części ekranu (z dala od panelu) nad różnymi wydzieleniami;
+  // pierwsze – o najwyższym potencjale borowika
   const c = map.getCanvas().getBoundingClientRect();
-  let best = null;
-  for (let x = c.width * 0.55; x < c.width * 0.85; x += 25)  // z dala od panelu po lewej
+  const hits = [];
+  for (let x = c.width * 0.55; x < c.width * 0.85; x += 25)
     for (let y = c.height * 0.3; y < c.height * 0.7; y += 25) {
       const f = map.queryRenderedFeatures([x, y], {layers: ['pot']})[0];
-      if (f && (!best || f.properties.p0 > best.p)) best = {x, y, p: f.properties.p0, i: f.properties.i};
+      if (f) hits.push({x: x + c.left, y: y + c.top, p: f.properties.p0, i: f.properties.i});
     }
-  return best ? {ok: true, x: best.x + c.left, y: best.y + c.top, i: best.i} : {ok: false};
+  if (!hits.length) return {ok: false};
+  hits.sort((a, b) => b.p - a.p);
+  const first = hits[0], second = hits.find(h => h.i !== first.i) || null;
+  const el = document.elementFromPoint(first.x, first.y);
+  return {ok: true, x: first.x, y: first.y, i: first.i, second, cel: el ? el.className : null};
 })()"""
 
 
@@ -202,14 +213,22 @@ def run(cfg: dict, paths: Paths, timeout_s: float = 600, center=(23.62, 52.73)) 
             report["kontrola"] = dt.eval(CHECK_JS)
             dt.screenshot(png)
             target = dt.eval(POPUP_JS % json.dumps(list(center)))
+            report["cel_klikniecia"] = target.get("cel") if target else None
             if target and target.get("ok"):
-                for typ in ("mouseMoved", "mousePressed", "mouseReleased"):
-                    dt.call("Input.dispatchMouseEvent", type=typ, x=target["x"], y=target["y"],
-                            button="left", clickCount=1)
+                popup_text = ("(() => { const p = document.querySelector('.maplibregl-popup-content');"
+                              " return p ? p.innerText : null; })()")
+                second = target.get("second")
+                if second:  # najpierw inne wydzielenie, potem docelowe – popup ma się przenieść
+                    click(dt, second["x"], second["y"])
+                    dt.wait_for("!!document.querySelector('.maplibregl-popup-content')", 30, step=1)
+                    time.sleep(1)
+                    first_text = dt.eval(popup_text)
+                click(dt, target["x"], target["y"])
                 dt.wait_for("!!document.querySelector('.maplibregl-popup-content')", 30, step=1)
                 time.sleep(2)
-                report["popup"] = dt.eval("(() => { const p = document.querySelector('.maplibregl-popup-content');"
-                                          " return p ? p.innerText : null; })()")
+                report["popup"] = dt.eval(popup_text)
+                if second:
+                    report["popup_przeniesiony"] = bool(report["popup"]) and report["popup"] != first_text
                 dt.screenshot(png_popup)
         else:
             dt.screenshot(png)
@@ -223,10 +242,14 @@ def run(cfg: dict, paths: Paths, timeout_s: float = 600, center=(23.62, 52.73)) 
         shutil.rmtree(profile, ignore_errors=True)
 
     write_json(paths.out / "zrzut_raport.json", report)
-    ok = bool(report.get("kontrola", {}).get("pot")) and not report["bledy_js"] and report.get("popup")
+    k = report.get("kontrola", {})
+    ok = (bool(k.get("pot")) and k.get("nakladka") == "none" and not report["bledy_js"]
+          and report.get("popup") and report.get("popup_przeniesiony", True))
     log(f"zapisano {png}: załadowano w {report['czas_ladowania_s']} s, "
         f"wyrenderowane wydzielenia {report.get('kontrola', {}).get('pot')} (+{report.get('kontrola', {}).get('wyk')} wykluczonych), "
-        f"popup {'tak' if report.get('popup') else 'NIE'}, błędy JS: {len(report['bledy_js'])}")
+        f"popup {'tak' if report.get('popup') else 'NIE'}"
+        f"{'' if report.get('popup_przeniesiony', True) else ' (NIE przeniósł się na drugie wydzielenie)'}, "
+        f"błędy JS: {len(report['bledy_js'])}")
     for e in report["bledy_js"][:10]:
         log(f"  błąd JS: {e}")
     if not ok:

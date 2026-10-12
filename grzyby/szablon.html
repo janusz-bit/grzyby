@@ -8,7 +8,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/{{MAPLIBRE}}/maplibre-gl.js"></script>
 <style>
   :root {
-    --surface: #fcfcfb; --surface-2: #f2f1ed; --ink: #1d1c1a; --ink-2: #52514e; --ink-3: #7a7873;
+    --surface: #fcfcfb; --surface-2: #f2f1ed; --ink: #1d1c1a; --ink-2: #52514e; --ink-3: #6b6964;
     --line: #dddbd4; --accent: #8a3008; --warn-bg: #fff4d6; --warn-line: #e3b341; --excl: #8c8c8c;
     --gbif: #2a78d6;
   }
@@ -23,10 +23,13 @@
   }
   #panel header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
   #panel h1 { font-size: 17px; margin: 0; }
-  #panel .sub { color: var(--ink-2); font-size: 12px; margin: 2px 0 8px; }
+  #panel .stale { font-size: 12px; color: var(--ink-2); margin-top: 4px; }
+  #panel .stale b { color: var(--ink); }
+  #panel .sub { color: var(--ink-2); font-size: 12px; margin: 6px 0 8px; }
   #zwin { border: 1px solid var(--line); background: var(--surface-2); border-radius: 6px; cursor: pointer; padding: 2px 8px; color: var(--ink); }
   #panel.zwiniety .tresc { display: none; }
   .ostrzezenie { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 8px; padding: 7px 9px; font-size: 12.5px; margin: 6px 0 10px; }
+  .nieaktualne { background: #fde8e4; border: 1px solid #d9806b; border-radius: 8px; padding: 6px 9px; font-size: 12.5px; margin: 6px 0; }
   .grupa { margin: 10px 0; }
   .grupa > .etykieta { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-3); margin-bottom: 4px; }
   .seg { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -43,17 +46,20 @@
   .legenda .pasek { height: 12px; border-radius: 3px; border: 1px solid var(--line); }
   .legenda .ticki { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-2); margin-top: 2px; }
   .legenda .wiersz { display: flex; align-items: center; gap: 8px; font-size: 12.5px; margin-top: 6px; }
+  .legenda details { font-size: 12px; color: var(--ink-2); margin: 2px 0 0 30px; }
+  .legenda details ul { margin: 3px 0; padding-left: 16px; }
   .sw { width: 22px; height: 14px; border: 1px solid #777; border-radius: 3px; flex: none; }
   .sw.kreski { background: repeating-linear-gradient(135deg, #8c8c8c 0 2px, #cfcfcf 2px 5px); }
   .sw.punkt { width: 10px; height: 10px; border-radius: 50%; background: var(--gbif); border: 0; }
   .meta { font-size: 11.5px; color: var(--ink-3); margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
   .meta a { color: inherit; }
-  #ladowanie { position: absolute; inset: 0; display: grid; place-items: center; z-index: 5; background: rgba(252,252,251,.85); font-size: 16px; color: var(--ink-2); }
+  #ladowanie { position: absolute; inset: 0; display: grid; place-items: center; z-index: 5; background: rgba(252,252,251,.85); font-size: 16px; color: var(--ink-2); padding: 20px; text-align: center; }
   .maplibregl-popup { z-index: 3; }  /* popup nad panelem */
-  .maplibregl-popup-content { max-width: 380px; max-height: 60vh; overflow: auto; font-size: 13px; padding: 10px 12px; }
+  .maplibregl-popup-content { max-width: min(380px, calc(100vw - 40px)); max-height: 60vh; overflow: auto; font-size: 13px; padding: 10px 12px; }
   .pp h3 { margin: 0 0 2px; font-size: 14px; }
   .pp .adr { font-family: ui-monospace, monospace; font-size: 12px; color: var(--ink-2); }
   .pp .wyk { background: #eee; border-left: 4px solid var(--excl); padding: 4px 7px; margin: 6px 0; font-weight: 600; }
+  .pp .ostrz { background: var(--warn-bg); border-left: 4px solid var(--warn-line); padding: 4px 7px; margin: 6px 0; }
   .pp dl { display: grid; grid-template-columns: auto 1fr; gap: 1px 8px; margin: 6px 0; }
   .pp dt { color: var(--ink-3); } .pp dd { margin: 0; }
   .pp table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 12.5px; }
@@ -63,7 +69,12 @@
   .pp .dlaczego { font-size: 12.5px; color: var(--ink-2); background: var(--surface-2); border-radius: 6px; padding: 6px 8px; }
   .pp .dlaczego p { margin: 3px 0; }
   @media (max-width: 600px) {
-    #panel { width: auto; right: 10px; max-height: 55vh; }
+    #panel { width: auto; right: 58px; max-height: 55vh; padding: 10px 12px; }  /* kontrolki zoomu/GPS zostają widoczne */
+    /* popup jako dolna karta – kotwice MapLibre i tak ucinałyby go na wąskim ekranie */
+    .maplibregl-popup { position: fixed; left: 8px; right: 8px; bottom: 8px; top: auto !important;
+                        transform: none !important; max-width: none !important; }
+    .maplibregl-popup-tip { display: none; }
+    .maplibregl-popup-content { max-width: none; max-height: 50vh; }
   }
 </style>
 </head>
@@ -74,6 +85,9 @@
     <h1>Gdzie na grzyby?</h1>
     <button id="zwin" title="zwiń/rozwiń panel" aria-expanded="true">–</button>
   </header>
+  <!-- zawsze widoczne, także po zwinięciu panelu -->
+  <div class="stale"><b>Potencjał, nie pewność</b> · nie służy do oceny jadalności · <span id="pogodaData"></span></div>
+  <div class="nieaktualne" id="nieaktualne" hidden></div>
   <div class="tresc">
     <div class="sub">Potencjał siedliskowy (BDL) × wskaźnik pogodowy (Open-Meteo)</div>
     <div class="ostrzezenie">Mapa pokazuje <b>modelowany potencjał</b>, a nie pewność, że grzyby tam są.
@@ -87,15 +101,16 @@
     <div class="grupa">
       <div class="etykieta">Dzień</div>
       <div class="seg dni" id="dni"></div>
-      <label class="opcja"><input type="checkbox" id="tylkoSiedlisko"> sam potencjał siedliskowy (bez pogody)</label>
+      <label class="opcja"><input type="checkbox" id="tylkoSiedlisko" autocomplete="off"> sam potencjał siedliskowy (bez pogody)</label>
     </div>
     <div class="grupa legenda">
       <div class="etykieta" id="legendaTytul">Potencjał × pogoda</div>
       <div class="pasek" id="pasek"></div>
       <div class="ticki"><span>0</span><span>0,2</span><span>0,4</span><span>0,6</span><span>0,8</span><span>1</span></div>
-      <div class="wiersz"><span class="sw kreski"></span> niedostępne: rezerwat, ostoja, drzewostan nasienny, pow. badawcza, uprawa do 4 m, grunt nieleśny</div>
-      <label class="opcja wiersz"><input type="checkbox" id="gbif"> <span id="gbifOpis">obserwacje z GBIF</span> <span class="sw punkt" aria-hidden="true"></span></label>
-      <label class="opcja wiersz">krycie <input type="range" id="krycie" min="0.2" max="1" step="0.05" value="0.75" style="flex:1"></label>
+      <div class="wiersz"><span class="sw kreski"></span> niedostępne lub z zakazem zbioru</div>
+      <details><summary>co obejmuje</summary><ul id="wykluczeniaLista"></ul></details>
+      <label class="opcja wiersz"><input type="checkbox" id="gbif" autocomplete="off"> <span id="gbifOpis">obserwacje z GBIF</span> <span class="sw punkt" aria-hidden="true"></span></label>
+      <label class="opcja wiersz">krycie <input type="range" id="krycie" min="0.2" max="1" step="0.05" value="0.75" autocomplete="off" style="flex:1"></label>
     </div>
     <div class="meta" id="meta"></div>
   </div>
@@ -111,22 +126,34 @@ const GBIF = /*{{GBIF}}*/null;
 
 const KEYS = META.gatunki.map(g => g.k);
 const state = { sp: "any", dzien: 0, tylkoSiedlisko: false, krycie: 0.75, gbif: false };
-let D = null, F = null, map = null, popup = null;
+let D = null, F = null, map = null, popup = null, wybrane = null;
 const MIES = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
 
 const fmt = (v, d = 2) => v == null ? "–" : Number(v).toFixed(d).replace(".", ",");
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const dataPL = iso => { const [y, m, d] = iso.split("-"); return `${d}.${m}`; };
+// RRRR-MM-DD w strefie, w której liczono pogodę
+const dzisLokalnie = () => new Date().toLocaleDateString("sv-SE", { timeZone: POGODA.strefa || "Europe/Warsaw" });
+
+function blad(msg) {
+  window.__mapaBlad = String(msg);
+  const el = document.getElementById("ladowanie");
+  el.hidden = false;
+  el.textContent = msg;
+}
 
 async function dekoduj() {
-  const b64 = document.getElementById("dane").textContent.trim();
-  const bin = atob(b64);
+  const el = document.getElementById("dane");
+  const bin = atob(el.textContent.trim());
+  el.remove();  // zwalniamy ~15 MB tekstu base64
   const u8 = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
   const stream = new Blob([u8]).stream().pipeThrough(new DecompressionStream("gzip"));
   return await new Response(stream).json();
 }
 
+// Uwaga: przekazanie GeoJSON jako tekstu w Blob URL odciążyłoby główny wątek, ale Chrome przy
+// otwarciu z file:// nie pozwala workerowi MapLibre pobrać adresu blob: – zostaje obiekt.
 function geojson() {
   const S = D.skala_wsp, N = F.geom.length, out = new Array(N);
   for (let i = 0; i < N; i++) {
@@ -144,6 +171,7 @@ function geojson() {
       geometry: polys.length === 1 ? { type: "Polygon", coordinates: polys[0] } : { type: "MultiPolygon", coordinates: polys },
     };
   }
+  F.geom = null;  // geometria żyje dalej tylko w źródle MapLibre
   return { type: "FeatureCollection", features: out };
 }
 
@@ -179,13 +207,20 @@ function kreski() {
 }
 
 function odswiezMape() {
-  if (!map || !map.getLayer("pot")) return;
-  map.setPaintProperty("pot", "fill-color", kolorExpr());
-  map.setPaintProperty("pot", "fill-opacity", state.krycie);
-  map.setPaintProperty("wyk", "fill-opacity", Math.min(1, state.krycie + 0.1));
-  map.setLayoutProperty("gbif", "visibility", state.gbif ? "visible" : "none");
-  map.setFilter("gbif", state.sp === "any" ? null : ["==", ["get", "g"], state.sp]);
+  if (map && map.getLayer("pot")) {
+    map.setPaintProperty("pot", "fill-color", kolorExpr());
+    map.setPaintProperty("pot", "fill-opacity", state.krycie);
+    map.setPaintProperty("wyk", "fill-opacity", Math.min(1, state.krycie + 0.1));
+    map.setLayoutProperty("gbif", "visibility", state.gbif ? "visible" : "none");
+    map.setFilter("gbif", state.sp === "any" ? null : ["==", ["get", "g"], state.sp]);
+  }
   if (popup && popup.isOpen() && popup._i != null) popup.setHTML(popupHtml(popup._i));
+}
+
+function zaznacz(i) {
+  if (wybrane != null) map.setFeatureState({ source: "w", id: wybrane }, { sel: false });
+  wybrane = i;
+  if (i != null) map.setFeatureState({ source: "w", id: i }, { sel: true });
 }
 
 // --- panel --------------------------------------------------------------------
@@ -193,36 +228,53 @@ function zakresSezonu(sez) {
   const m = Object.keys(sez).map(Number).filter(k => sez[k] > 0).sort((a, b) => a - b);
   return m.length ? `${MIES[m[0]]}–${MIES[m[m.length - 1]]}` : "–";
 }
+const etykietaDnia = h => {
+  if (POGODA.dzis === dzisLokalnie()) return h.h === 0 ? "dziś" : "+" + h.h + " dni";
+  return h.data === dzisLokalnie() ? "dziś" : (h.h === 0 ? "dzień pobrania" : "+" + h.h + " dni od pobr.");
+};
 
 function zbudujPanel() {
   const gat = document.getElementById("gatunki");
   const opcje = [{ k: "any", nazwa: "dowolny gatunek (maksimum)" }, ...META.gatunki];
-  gat.innerHTML = opcje.map(g => {
-    const poza = g.k !== "any" && sezon(state.dzien, g.k) === 0 ? ` <span class="poza">(poza sez.)</span>` : "";
-    return `<button data-k="${g.k}" aria-pressed="${g.k === state.sp}" title="${esc(g.lacina || "")}">${esc(g.nazwa)}${poza}</button>`;
-  }).join("");
+  gat.innerHTML = opcje.map(g => `<button data-k="${g.k}" title="${esc(g.lacina || "")}">${esc(g.nazwa)}</button>`).join("");
   gat.querySelectorAll("button").forEach(b => b.onclick = () => { state.sp = b.dataset.k; aktualizujPanel(); odswiezMape(); });
 
   const dni = document.getElementById("dni");
   dni.innerHTML = POGODA.horyzonty.map((h, j) =>
-    `<button data-j="${j}" aria-pressed="${j === state.dzien}">${h.h === 0 ? "dziś" : "+" + h.h + " dni"}<br><small>${dataPL(h.data)}${h.prognoza ? " · prognoza" : ""}</small></button>`).join("");
+    `<button data-j="${j}">${etykietaDnia(h)}<br><small>${dataPL(h.data)}${h.prognoza ? " · prognoza" : ""}</small></button>`).join("");
   dni.querySelectorAll("button").forEach(b => b.onclick = () => { state.dzien = +b.dataset.j; aktualizujPanel(); odswiezMape(); });
 
-  document.getElementById("tylkoSiedlisko").onchange = e => { state.tylkoSiedlisko = e.target.checked; aktualizujPanel(); odswiezMape(); };
-  document.getElementById("krycie").oninput = e => { state.krycie = +e.target.value; odswiezMape(); };
-  document.getElementById("gbif").onchange = e => { state.gbif = e.target.checked; odswiezMape(); };
-  document.getElementById("zwin").onclick = () => {
-    const p = document.getElementById("panel"); const z = p.classList.toggle("zwiniety");
-    document.getElementById("zwin").textContent = z ? "+" : "–";
-    document.getElementById("zwin").setAttribute("aria-expanded", String(!z));
+  // stan startowy z formularza (Firefox potrafi przywrócić pola po przeładowaniu)
+  const ts = document.getElementById("tylkoSiedlisko"), gb = document.getElementById("gbif"), kr = document.getElementById("krycie");
+  state.tylkoSiedlisko = ts.checked; state.gbif = gb.checked; state.krycie = +kr.value;
+  ts.onchange = e => { state.tylkoSiedlisko = e.target.checked; aktualizujPanel(); odswiezMape(); };
+  kr.oninput = e => { state.krycie = +e.target.value; odswiezMape(); };
+  gb.onchange = e => { state.gbif = e.target.checked; odswiezMape(); };
+
+  const panel = document.getElementById("panel"), zwin = document.getElementById("zwin");
+  const ustawZwiniety = z => {
+    panel.classList.toggle("zwiniety", z);
+    zwin.textContent = z ? "+" : "–";
+    zwin.setAttribute("aria-expanded", String(!z));
   };
+  zwin.onclick = () => ustawZwiniety(!panel.classList.contains("zwiniety"));
+  if (window.matchMedia("(max-width: 600px)").matches) ustawZwiniety(true);  // telefon: najpierw mapa
+
   const stops = META.skala;
   document.getElementById("pasek").style.background =
     `linear-gradient(to right, ${stops.map(([x, c]) => `${c} ${x * 100}%`).join(", ")}, ${stops[stops.length - 1][1]} 100%)`;
+  document.getElementById("wykluczeniaLista").innerHTML = META.wykluczenia_lista.map(t => `<li>${esc(t)}</li>`).join("");
   document.getElementById("gbifOpis").textContent = `obserwacje z GBIF (${GBIF.punkty.length})`;
+  document.getElementById("pogodaData").textContent = `pogoda z ${POGODA.pobrano.slice(0, 16).replace("T", " ")}`;
+  if (POGODA.dzis !== dzisLokalnie()) {
+    const n = Math.round((new Date(dzisLokalnie()) - new Date(POGODA.dzis)) / 864e5);
+    const el = document.getElementById("nieaktualne");
+    el.hidden = false;
+    el.textContent = `Pogoda policzona ${dataPL(POGODA.dzis)}${n > 0 ? ` (${n} dni temu)` : ""} – przyciski dni pokazują daty z tamtego przebiegu. Odśwież: nix run .#pogoda`;
+  }
   document.getElementById("meta").innerHTML =
     `Pogoda: ${esc(POGODA.zrodlo)}, pobrano ${esc(POGODA.pobrano.replace("T", " "))}. ` +
-    `„+3”/„+7” liczone z prognozy – im dalej, tym mniej pewne.<br>` +
+    `Dni „+3”/„+7” liczone z prognozy – im dalej, tym mniej pewne.<br>` +
     `Drzewostany: Bank Danych o Lasach (bdl.lasy.gov.pl), stan 2026; dane przetworzone. ` +
     `Obserwacje: GBIF.org. Podkład: © OpenStreetMap. Mapę zbudowano ${esc(META.zbudowano.replace("T", " "))}.`;
   aktualizujPanel();
@@ -258,30 +310,21 @@ function sklad(i) {
     const [st, sp, part, age, h] = c.slice(j, j + 5);
     let g = grupy.find(x => x.st === st); if (!g) grupy.push(g = { st, el: [] });
     const extra = [age >= 0 ? `${age} l.` : null, h >= 0 ? `${h} m` : null].filter(Boolean).join(", ");
-    g.el.push(`${esc(sp)} ${udzialTxt(part)}${extra ? ` (${extra})` : ""}`);
+    g.el.push(`${esc(sp)} ${udzialTxt(part)}${extra ? ` (${extra})` : ""}`.replace("  ", " "));
   }
   return grupy.map(g => (D.pietra[g.st] ? `<i>${D.pietra[g.st]}:</i> ` : "") + g.el.join(", ")).join("<br>");
 }
 
-function udzial(part) {  // jak w Pythonie: część/10, MJS i PJD wg config.yaml
-  if (part === "MJS") return META.drzewostan.udzial_mjs;
-  if (part === "PJD") return META.drzewostan.udzial_pjd;
-  return part === "" ? 0 : Number(part) / 10;
-}
-
 function zywicieleTxt(i, g) {
-  // udział żywiciela ważony wagą piętra (drzewostan 1, II piętro 0,6, podrost 0,15 ...)
-  const c = F.comp[i], acc = {}, wagi = META.drzewostan.wagi_pieter;
-  for (let j = 0; j < c.length; j += 5) {
-    const [st, sp, part] = c.slice(j, j + 3);
+  // F.ws: [kod, udział ważony wagą piętra w %, ...] – te same liczby, które wchodzą do modelu
+  const ws = F.ws[i], el = [];
+  for (let j = 0; j < ws.length; j += 2) {
+    const sp = ws[j], u = ws[j + 1];
     const w = g.zywiciele[sp] ?? g.zywiciele[sp.split(".")[0]];
-    if (!w || !(st in wagi)) continue;
-    acc[sp] = acc[sp] || { u: 0, w };
-    acc[sp].u += udzial(part) * wagi[st];
+    if (w) el.push({ sp, u, w });
   }
-  const el = Object.entries(acc).sort((a, b) => b[1].u * b[1].w - a[1].u * a[1].w)
-    .map(([sp, a]) => `${esc(sp)} ${Math.round(a.u * 100)}%${a.w < 1 ? ` (waga ${fmt(a.w, 1)})` : ""}`);
-  return el.length ? el.join(", ") : "brak";
+  el.sort((a, b) => b.u * b.w - a.u * a.w);
+  return el.length ? el.map(e => `${esc(e.sp)} ${e.u}%${e.w < 1 ? ` (waga ${fmt(e.w, 1)})` : ""}`).join(", ") : "brak";
 }
 
 function wynik(i, k, j) {
@@ -292,17 +335,18 @@ function wynik(i, k, j) {
 
 function popupHtml(i) {
   const j = state.dzien, H = POGODA.horyzonty[j], g = F.g[i];
-  const ex = D.wykluczenia[F.ex[i]];
+  const ex = D.wykluczenia[F.ex[i]], warn = D.ostrzezenia[F.warn[i]];
   const site = D.siedliska[F.site[i]];
   const siteName = D.siedliska_nazwy[F.site[i]];
   const rows = META.gatunki.map(gt => ({ gt, ...wynik(i, gt.k, j) }));
   const sel = state.sp === "any" ? rows.slice().sort((a, b) => b.v - a.v)[0] : rows.find(r => r.gt.k === state.sp);
   const tab = rows.slice().sort((a, b) => b.v - a.v).map(r =>
-    `<tr class="${r === sel ? "sel" : ""}"><td>${esc(r.gt.nazwa)}</td><td>${fmt(r.p)}</td><td>${fmt(r.w)}</td><td>${fmt(r.p * r.w)}</td></tr>`).join("");
+    `<tr class="${r === sel ? "sel" : ""}"><td>${esc(r.gt.nazwa)}</td><td>${fmt(r.p)}</td><td>${fmt(r.w)}</td><td>${fmt(r.v)}</td></tr>`).join("");
   const gt = sel.gt, k = gt.k;
   const S = H.skladniki, pc = META.pogoda_cfg;
   const m = Number(H.data.slice(5, 7));
   const sez = sezon(j, k);
+  const v100 = c => F[c + "_" + k][i] / 100;
   const pogodaTxt = `<p><b>Pogoda</b> (${dataPL(H.data)}${H.prognoza ? ", prognoza" : ""}, punkt siatki ${g}):
     opad ${pc.okno_opadu} dni ${fmt(S.opad_mm[g], 0)} mm (×${fmt(S.f_opad[g])})${S.wysyp_mm[g] != null && S.wysyp_mm[g] >= pc.wysyp_prog ? `, obfity deszcz ${pc.wysyp[0]}–${pc.wysyp[1]} dni wcześniej (${fmt(S.wysyp_mm[g], 0)} mm)` : ""};
     wilgotność gleby ${S.gleba[g] == null ? "–" : fmt(S.gleba[g]) + " m³/m³"} → wilgoć ×${fmt(S.f_wilg[g])};
@@ -310,23 +354,25 @@ function popupHtml(i) {
     Tmin ${pc.okno_mrozu} dni ${fmt(S.t_min[g], 1)}°C${S.f_mroz[g] < 1 ? ` – przymrozek ×${fmt(S.f_mroz[g])}` : ""};
     sezon (${MIES[m]}): ${sez > 0 ? "tak" : "<b>poza sezonem → 0</b>"}.
     Wskaźnik pogodowy: <b>${fmt(pogodaWezel(j, g) * sez)}</b>.</p>`;
+  const domieszka = v100("uf") > Math.min(1, v100("hs") / gt.nasycenie) + 0.005 ? " (reguła domieszki)" : "";
   const siedliskoTxt = `<p><b>Siedlisko</b> (${esc(gt.nazwa)}): żywiciele ${zywicieleTxt(i, gt)}
-    → udział ważony ${fmt(F["hs_" + k][i] / 100)} × wiek ${fmt(F["af_" + k][i] / 100)}
-    ÷ nasycenie ${fmt(gt.nasycenie, 1)} → ${fmt(F["hz_" + k][i] / 100)} (maks. 1);
-    × siedlisko ${esc(site || "brak")} ${fmt(F["sf_" + k][i] / 100)}
-    ⇒ potencjał <b>${fmt(F["p_" + k][i] / 100)}</b>.</p>`;
+    → udział ważony ${fmt(v100("hs"))} ÷ nasycenie ${fmt(gt.nasycenie, 1)} → ${fmt(v100("uf"))}${domieszka} (maks. 1);
+    × wiek ${fmt(v100("af"))} → ${fmt(v100("hz"))};
+    × siedlisko ${esc(site || "brak")} ${fmt(v100("sf"))}
+    ⇒ potencjał <b>${fmt(v100("p"))}</b>.</p>`;
   return `<div class="pp">
     <h3>${esc(D.nadl[F.n[i]])}</h3>
     <div class="adr">${esc(F.adr[i])}</div>
     ${ex ? `<div class="wyk">Niedostępne: ${esc(ex)}</div>` : ""}
+    ${warn ? `<div class="ostrz">Uwaga: ${esc(warn)}</div>` : ""}
     <dl>
       <dt>Rodzaj</dt><dd>${esc(D.rodzaje_nazwy[F.area[i]] || D.rodzaje[F.area[i]])}${F.ha[i] >= 0 ? `, ${fmt(F.ha[i] / 100)} ha` : ""}</dd>
       <dt>Siedlisko</dt><dd>${site ? `${esc(site)} – ${esc(siteName)}` : "–"}</dd>
-      <dt>Wiek</dt><dd>${F.age[i] >= 0 ? `${F.age[i]} lat (${esc(F.lead[i])})` : "–"}${F.hgt[i] >= 0 ? `, wys. ${F.hgt[i]} m` : ""}</dd>
+      <dt>Wiek</dt><dd>${F.age[i] >= 0 ? `${F.age[i]} lat (${esc(F.lead[i])})` : "–"}${F.hgt[i] >= 0 ? `, wys. śr. ${F.hgt[i]} m` : ""}</dd>
       <dt>Skład</dt><dd>${sklad(i)}</dd>
       ${D.ochronnosc[F.prot[i]] ? `<dt>Ochronność</dt><dd>${esc(D.ochronnosc[F.prot[i]])}</dd>` : ""}
     </dl>
-    <table><thead><tr><th>gatunek</th><th>siedl.</th><th>pogoda</th><th>wynik</th></tr></thead><tbody>${tab}</tbody></table>
+    <table><thead><tr><th>gatunek</th><th>siedl.</th><th>pogoda</th><th>${state.tylkoSiedlisko ? "wynik (siedl.)" : "wynik"}</th></tr></thead><tbody>${tab}</tbody></table>
     <div class="dlaczego">${siedliskoTxt}${pogodaTxt}</div>
   </div>`;
 }
@@ -337,12 +383,16 @@ function gbifPopup(p) {
     <dl><dt>Data</dt><dd>${esc(p.d || "–")}</dd>
     <dt>Niepewność</dt><dd>${p.u != null ? p.u + " m" : "brak danych"}</dd>
     <dt>Potencjał wydz.</dt><dd>${p.p != null ? fmt(p.p) + (p.m === "blisko" ? " (najbliższe wydzielenie)" : "") : "poza lasami z BDL"}</dd></dl>
-    <a href="https://www.gbif.org/occurrence/${p.k}" target="_blank" rel="noopener">rekord w GBIF</a></div>`;
+    <a href="https://www.gbif.org/occurrence/${encodeURIComponent(p.k)}" target="_blank" rel="noopener">rekord w GBIF</a></div>`;
 }
 
 // --- start --------------------------------------------------------------------
 async function start() {
   zbudujPanel();
+  if (!window.maplibregl) {
+    blad("Nie wczytano biblioteki MapLibre z CDN – mapa wymaga połączenia z internetem.");
+    return;
+  }
   map = new maplibregl.Map({
     container: "map",
     hash: true,
@@ -357,63 +407,65 @@ async function start() {
       layers: [{ id: "osm", type: "raster", source: "osm" }],
     },
   });
+  // 'load' strzela raz – obietnica zapisana przed długim dekodowaniem, żeby go nie przegapić
+  const zaladowana = new Promise(r => map.once("load", r));
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
   map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-right");
   map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: true }), "top-right");
 
   try { D = await dekoduj(); }
   catch (e) {
-    window.__mapaBlad = String(e);
-    document.getElementById("ladowanie").textContent = "Nie udało się rozpakować danych (wymagana nowsza przeglądarka z DecompressionStream): " + e;
+    blad("Nie udało się rozpakować danych (wymagana nowsza przeglądarka z DecompressionStream): " + e);
     return;
   }
   F = D.f;
   const fc = geojson();
   const gbifFc = { type: "FeatureCollection", features: GBIF.punkty.map(p => ({ type: "Feature", properties: p, geometry: { type: "Point", coordinates: [p.lon, p.lat] } })) };
+  await zaladowana;
 
-  const dodaj = () => {
-    map.addImage("kreski", kreski());
-    map.addSource("w", { type: "geojson", data: fc, maxzoom: 14, tolerance: 0.3 });
-    map.addSource("gbif", { type: "geojson", data: gbifFc });
-    map.addLayer({ id: "pot", type: "fill", source: "w", filter: ["==", ["get", "x"], 0],
-      paint: { "fill-color": kolorExpr(), "fill-opacity": state.krycie } });
-    map.addLayer({ id: "wyk", type: "fill", source: "w", filter: [">", ["get", "x"], 0],
-      paint: { "fill-pattern": "kreski", "fill-opacity": Math.min(1, state.krycie + 0.1) } });
-    map.addLayer({ id: "kontur", type: "line", source: "w", minzoom: 12,
-      paint: { "line-color": "#5b4a3a", "line-opacity": 0.35, "line-width": 0.5 } });
-    map.addLayer({ id: "wybrane", type: "line", source: "w", filter: ["==", ["id"], -1],
-      paint: { "line-color": "#111", "line-width": 2.5 } });
-    map.addLayer({ id: "gbif", type: "circle", source: "gbif", layout: { visibility: "none" },
-      paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 7, 4, 13, 7], "circle-color": "#2a78d6",
-               "circle-stroke-color": "#fff", "circle-stroke-width": 2 } });
-    odswiezMape();
-    document.getElementById("ladowanie").hidden = true;
-    map.once("idle", () => { window.__mapaGotowa = true; });
+  map.addImage("kreski", kreski());
+  map.addSource("w", { type: "geojson", data: fc, maxzoom: 14, tolerance: 0.3,
+    attribution: 'Drzewostany: <a href="https://www.bdl.lasy.gov.pl/" target="_blank">BDL</a> · pogoda: <a href="https://open-meteo.com/" target="_blank">Open-Meteo</a> (CC BY 4.0)' });
+  map.addSource("gbif", { type: "geojson", data: gbifFc, attribution: '<a href="https://www.gbif.org/" target="_blank">GBIF.org</a>' });
+  map.addLayer({ id: "pot", type: "fill", source: "w", filter: ["==", ["get", "x"], 0],
+    paint: { "fill-color": kolorExpr(), "fill-opacity": state.krycie } });
+  map.addLayer({ id: "wyk", type: "fill", source: "w", filter: [">", ["get", "x"], 0],
+    paint: { "fill-pattern": "kreski", "fill-opacity": Math.min(1, state.krycie + 0.1) } });
+  map.addLayer({ id: "kontur", type: "line", source: "w", minzoom: 12,
+    paint: { "line-color": "#5b4a3a", "line-opacity": 0.35, "line-width": 0.5 } });
+  // podświetlenie przez feature-state – bez przeładowania kafli przy każdym kliknięciu
+  map.addLayer({ id: "wybrane", type: "line", source: "w",
+    paint: { "line-color": "#111", "line-width": 2.5, "line-opacity": ["case", ["boolean", ["feature-state", "sel"], false], 1, 0] } });
+  map.addLayer({ id: "gbif", type: "circle", source: "gbif", layout: { visibility: "none" },
+    paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 7, 4, 13, 7], "circle-color": "#2a78d6",
+             "circle-stroke-color": "#fff", "circle-stroke-width": 2 } });
+  odswiezMape();
+  document.getElementById("ladowanie").hidden = true;
+  map.once("idle", () => { window.__mapaGotowa = true; });
+
+  // jeden popup, zamykany ręcznie (closeOnClick: false), żeby kliknięcie innego wydzielenia go przenosiło
+  popup = new maplibregl.Popup({ maxWidth: "min(400px, calc(100vw - 30px))", closeOnClick: false });
+  popup.on("close", () => { popup._i = null; zaznacz(null); });
+  const pokaz = (lngLat, html, i) => {
+    popup._i = i;
+    popup.setLngLat(lngLat).setHTML(html);
+    if (!popup.isOpen()) popup.addTo(map);
+    zaznacz(i);
   };
-  if (map.loaded() || map.isStyleLoaded()) dodaj(); else map.once("load", dodaj);
-
-  popup = new maplibregl.Popup({ maxWidth: "400px" });
-  popup.on("close", () => map.setFilter("wybrane", ["==", ["id"], -1]));
   map.on("click", e => {
     const pts = map.queryRenderedFeatures(e.point, { layers: ["gbif"] });
-    if (pts.length) {
-      popup._i = null;
-      popup.setLngLat(e.lngLat).setHTML(gbifPopup(pts[0].properties)).addTo(map);
-      return;
-    }
+    if (pts.length) { pokaz(e.lngLat, gbifPopup(pts[0].properties), null); return; }
     const f = map.queryRenderedFeatures(e.point, { layers: ["pot", "wyk"] });
-    if (!f.length) return;
+    if (!f.length) { popup.remove(); return; }
     const i = f[0].properties.i;
-    popup._i = i;
-    map.setFilter("wybrane", ["==", ["id"], i]);
-    popup.setLngLat(e.lngLat).setHTML(popupHtml(i)).addTo(map);
+    pokaz(e.lngLat, popupHtml(i), i);
   });
   for (const l of ["pot", "wyk", "gbif"]) {
     map.on("mouseenter", l, () => map.getCanvas().style.cursor = "pointer");
     map.on("mouseleave", l, () => map.getCanvas().style.cursor = "");
   }
 }
-start();
+start().catch(e => blad("Błąd mapy: " + e));
 </script>
 </body>
 </html>
