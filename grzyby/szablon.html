@@ -111,6 +111,8 @@
       <details><summary>co obejmuje</summary><ul id="wykluczeniaLista"></ul></details>
       <label class="opcja wiersz"><input type="checkbox" id="gbif" autocomplete="off"> <span id="gbifOpis">obserwacje z GBIF</span> <span class="sw punkt" aria-hidden="true"></span></label>
       <label class="opcja wiersz">krycie <input type="range" id="krycie" min="0.2" max="1" step="0.05" value="0.75" autocomplete="off" style="flex:1"></label>
+      <label class="opcja wiersz">podkład <select id="podklad" autocomplete="off" style="flex:1; min-width:0"></select></label>
+      <div class="uwaga" id="podkladUwaga" hidden></div>
     </div>
     <div class="meta" id="meta"></div>
   </div>
@@ -218,6 +220,98 @@ function odswiezMape({ popupTez = true } = {}) {
   if (popupTez && popup && popup.isOpen() && popup._i != null) popup.setHTML(popupHtml(popup._i));
 }
 
+// --- podkład --------------------------------------------------------------------
+// Domyślny podkład to wektorowy styl OSM (OpenFreeMap); rastrowe podkłady z META.podklady są
+// nakładane na niego (warstwy wektorowe są wtedy ukryte). Gdy styl wektorowy się nie wczyta,
+// zostają tylko rastry.
+const PODKLAD_KLUCZ = "grzyby.podklad";
+const WEKTOR = { id: "wektor", nazwa: META.styl_bazowy.nazwa, wektor: true };
+let PODKLADY = [WEKTOR, ...META.podklady];
+let warstwyBazy = [], pierwszySymbol;  // warstwy stylu wektorowego i miejsce na nasze warstwy
+let stylGotowy = false;                // do 'load' wybór podkładu tylko się zapamiętuje
+function podkladStartowy() {
+  let id = null;
+  try { id = localStorage.getItem(PODKLAD_KLUCZ); } catch (e) { /* prywatne okno itp. */ }
+  return PODKLADY.find(p => p.id === id) || PODKLADY[0];
+}
+function wypelnijWyborPodkladu() {
+  const sel = document.getElementById("podklad");
+  sel.innerHTML = PODKLADY.map(p => `<option value="${esc(p.id)}">${esc(p.nazwa)}</option>`).join("");
+  sel.value = podklad.id;
+}
+
+async function stylBazowy() {
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 15000);
+  try {
+    const r = await fetch(META.styl_bazowy.url, { signal: ctl.signal });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const s = await r.json();
+    const jez = META.styl_bazowy.jezyk;
+    if (jez) for (const l of s.layers) {  // polskie nazwy, gdy są w kaflach (name:pl)
+      const tf = l.layout && l.layout["text-field"];
+      if (Array.isArray(tf) && JSON.stringify(tf).includes('"name')) l.layout["text-field"] = ["coalesce", ["get", "name:" + jez], tf];
+    }
+    return s;
+  } catch (e) {
+    console.warn("styl wektorowy niedostępny:", e);
+    return null;
+  } finally { clearTimeout(t); }
+}
+// Kafle podkładu idą przez protokół „ponow://”: MapLibre sam nie ponawia nieudanych kafli,
+// a np. WMS Geoportalu przy wielu równoległych żądaniach gubi pojedyncze (404, reset połączenia).
+// Adres: ponow://<próby>/<min_bajtów>/<właściwy URL>
+async function pobierzKafel(params, abort) {
+  const [, proby, minB, url] = params.url.match(/^ponow:\/\/(\d+)\/(\d+)\/(.*)$/);
+  for (let proba = 1; ; proba++) {
+    const ostatnia = proba >= +proby;
+    let res = null;
+    try { res = await fetch(url, { signal: abort.signal }); }
+    catch (e) { if (abort.signal.aborted || ostatnia) throw e; }
+    if (res && res.ok) {
+      const data = await res.arrayBuffer();
+      if (data.byteLength >= +minB || ostatnia) return { data };  // mały = pusty kafel z błędu serwera
+    } else if (res && (ostatnia || ![404, 408, 429, 500, 502, 503, 504].includes(res.status))) {
+      // 401/403 (np. blokada OSM) bez ponawiania – obsłuży je bladPodkladu()
+      const err = new Error(`HTTP ${res.status}: ${url}`);
+      err.status = res.status;
+      throw err;
+    }
+    await new Promise(r => setTimeout(r, 300 * proba * proba));
+  }
+}
+const zrodloPodkladu = p => ({
+  type: "raster", tiles: p.kafle.map(u => `ponow://${p.proby || 3}/${p.min_bajtow || 0}/${u}`),
+  tileSize: p.rozmiar || 256, maxzoom: p.maxzoom, attribution: p.atrybucja,
+});
+let podklad = null, bledyPodkladu = 0;
+
+function ustawPodklad(p, uwaga) {
+  podklad = p;
+  bledyPodkladu = 0;
+  document.getElementById("podklad").value = p.id;
+  try { localStorage.setItem(PODKLAD_KLUCZ, p.id); } catch (e) { /* bez zapamiętywania */ }
+  const u = document.getElementById("podkladUwaga");
+  u.hidden = !uwaga; u.textContent = uwaga || "";
+  if (!stylGotowy) return;  // zastosuje go obsługa 'load' 
+  if (map.getLayer("podklad")) { map.removeLayer("podklad"); map.removeSource("podklad"); }
+  for (const id of warstwyBazy) map.setLayoutProperty(id, "visibility", p.wektor ? "visible" : "none");
+  if (!p.wektor) {
+    map.addSource("podklad", zrodloPodkladu(p));
+    map.addLayer({ id: "podklad", type: "raster", source: "podklad" }, map.getLayer("pot") ? "pot" : pierwszySymbol);
+  }
+}
+
+// serwer odrzuca kafle (np. OSM: 403 „Access blocked” dla strony otwartej z dysku) – wracamy do domyślnego
+function bladPodkladu(e) {
+  console.error(e.error || e);  // własny nasłuch wyłącza domyślne logowanie błędów MapLibre
+  if (e.sourceId !== "podklad") return;
+  const st = e.error && e.error.status;
+  if (st !== 401 && st !== 403) return;
+  const zapas = PODKLADY[0];
+  if (++bledyPodkladu < 3 || podklad.id === zapas.id) return;
+  ustawPodklad(zapas, `Serwer podkładu „${podklad.nazwa}” odrzucił kafle (HTTP ${st}) – przełączono na „${zapas.nazwa}”.`);
+}
+
 function zaznacz(i) {
   if (wybrane != null) map.setFeatureState({ source: "w", id: wybrane }, { sel: false });
   wybrane = i;
@@ -251,6 +345,9 @@ function zbudujPanel() {
   ts.onchange = e => { state.tylkoSiedlisko = e.target.checked; aktualizujPanel(); odswiezMape(); };
   kr.oninput = e => { state.krycie = +e.target.value; odswiezMape({ popupTez: false }); };
   gb.onchange = e => { state.gbif = e.target.checked; odswiezMape({ popupTez: false }); };
+  podklad = podkladStartowy();
+  wypelnijWyborPodkladu();
+  document.getElementById("podklad").onchange = e => ustawPodklad(PODKLADY.find(p => p.id === e.target.value));
 
   const panel = document.getElementById("panel"), zwin = document.getElementById("zwin");
   const ustawZwiniety = z => {
@@ -271,14 +368,15 @@ function zbudujPanel() {
     const n = Math.round((new Date(dzisLokalnie()) - new Date(POGODA.dzis)) / 864e5);
     const el = document.getElementById("nieaktualne");
     el.hidden = false;
-    el.textContent = `Pogoda policzona ${dataPL(POGODA.dzis)}${n > 0 ? ` (${n} dni temu)` : ""} – przyciski dni pokazują daty z tamtego przebiegu. Odśwież: nix run .#pogoda`;
+    const temu = n === 1 ? "wczoraj" : n > 1 ? `${n} dni temu` : "";
+    el.textContent = `Pogoda policzona ${dataPL(POGODA.dzis)}${temu ? ` (${temu})` : ""} – przyciski dni pokazują daty z tamtego przebiegu. Odśwież: nix run .#pogoda`;
   }
   document.getElementById("meta").innerHTML =
     `Pogoda: ${esc(POGODA.zrodlo)}, pobrano ${esc(POGODA.pobrano.replace("T", " "))}. ` +
     (POGODA.horyzonty.some(h => h.prognoza)
       ? `Dni ${POGODA.horyzonty.filter(h => h.prognoza).map(h => "„+" + h.h + "”").join("/")} liczone z prognozy – im dalej, tym mniej pewne.` : "") + "<br>" +
     `Drzewostany: Bank Danych o Lasach (bdl.lasy.gov.pl), stan 2026; dane przetworzone. ` +
-    `Obserwacje: GBIF.org. Podkład: © OpenStreetMap. Mapę zbudowano ${esc(META.zbudowano.replace("T", " "))}.`;
+    `Obserwacje: GBIF.org. Podkład: dane © OpenStreetMap (OpenFreeMap, OpenTopoMap) lub ortofotomapa GUGiK. Mapę zbudowano ${esc(META.zbudowano.replace("T", " "))}.`;
   aktualizujPanel();
 }
 
@@ -395,22 +493,33 @@ async function start() {
     blad("Nie wczytano biblioteki MapLibre z CDN – mapa wymaga połączenia z internetem.");
     return;
   }
+  maplibregl.addProtocol("ponow", pobierzKafel);
+  let styl = await stylBazowy();
+  if (styl) {
+    warstwyBazy = styl.layers.map(l => l.id);
+    pierwszySymbol = (styl.layers.find(l => l.type === "symbol") || {}).id;  // etykiety nad wydzieleniami
+  } else {  // bez stylu wektorowego: tylko rastry
+    PODKLADY = META.podklady.slice();
+    if (podklad.wektor) podklad = PODKLADY[0];
+    wypelnijWyborPodkladu();
+    styl = { version: 8, sources: {}, layers: [] };
+  }
   map = new maplibregl.Map({
     container: "map",
     hash: true,
     bounds: META.granice,
     fitBoundsOptions: { padding: 20 },
     maxZoom: 18,
-    style: {
-      version: 8,
-      sources: {
-        osm: { type: "raster", tiles: [META.podklad.url], tileSize: 256, maxzoom: 19, attribution: META.podklad.atrybucja },
-      },
-      layers: [{ id: "osm", type: "raster", source: "osm" }],
-    },
+    style: styl,
   });
   // 'load' strzela raz – obietnica zapisana przed długim dekodowaniem, żeby go nie przegapić
   const zaladowana = new Promise(r => map.once("load", r));
+  map.once("load", () => { stylGotowy = true; ustawPodklad(podklad, document.getElementById("podkladUwaga").textContent || null); });
+  if (!styl.layers.length) map.once("load", () => {
+    const u = document.getElementById("podkladUwaga");
+    u.hidden = false; u.textContent = "Nie wczytano wektorowej mapy OSM (OpenFreeMap) – dostępne są tylko podkłady rastrowe.";
+  });
+  map.on("error", bladPodkladu);
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
   map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-right");
   map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: true }), "top-right");
@@ -429,12 +538,14 @@ async function start() {
   map.addSource("w", { type: "geojson", data: fc, maxzoom: 14, tolerance: 0.3,
     attribution: 'Drzewostany: <a href="https://www.bdl.lasy.gov.pl/" target="_blank">BDL</a> · pogoda: <a href="https://open-meteo.com/" target="_blank">Open-Meteo</a> (CC BY 4.0)' });
   map.addSource("gbif", { type: "geojson", data: gbifFc, attribution: '<a href="https://www.gbif.org/" target="_blank">GBIF.org</a>' });
+  // nasze warstwy pod etykietami stylu wektorowego (nazwy miejscowości i dróg zostają widoczne)
+  const S = pierwszySymbol;
   map.addLayer({ id: "pot", type: "fill", source: "w", filter: ["==", ["get", "x"], 0],
-    paint: { "fill-color": kolorExpr(), "fill-opacity": state.krycie } });
+    paint: { "fill-color": kolorExpr(), "fill-opacity": state.krycie } }, S);
   map.addLayer({ id: "wyk", type: "fill", source: "w", filter: [">", ["get", "x"], 0],
-    paint: { "fill-pattern": "kreski", "fill-opacity": Math.min(1, state.krycie + 0.1) } });
+    paint: { "fill-pattern": "kreski", "fill-opacity": Math.min(1, state.krycie + 0.1) } }, S);
   map.addLayer({ id: "kontur", type: "line", source: "w", minzoom: 12,
-    paint: { "line-color": "#5b4a3a", "line-opacity": 0.35, "line-width": 0.5 } });
+    paint: { "line-color": "#5b4a3a", "line-opacity": 0.35, "line-width": 0.5 } }, S);
   // podświetlenie przez feature-state – bez przeładowania kafli przy każdym kliknięciu
   map.addLayer({ id: "wybrane", type: "line", source: "w",
     paint: { "line-color": "#111", "line-width": 2.5, "line-opacity": ["case", ["boolean", ["feature-state", "sel"], false], 1, 0] } });

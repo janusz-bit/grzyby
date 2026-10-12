@@ -326,7 +326,39 @@ mapa:
   # Skala sekwencyjna (jeden odcień, jasny -> ciemny) dla potencjał × pogoda (0–1).
   # Pomarańcz/brąz zamiast zieleni, żeby nie zlewała się z lasami na podkładzie OSM.
   skala: [[0.0, "#fff5eb"], [0.1, "#fdd0a2"], [0.25, "#fdae6b"], [0.4, "#fd8d3c"], [0.6, "#e6550d"], [0.8, "#a63603"]]
-  # Podkład (OSM). Biblioteka MapLibre GL ładowana z CDN.
-  podklad_url: https://tile.openstreetmap.org/{z}/{x}/{y}.png
-  podklad_atrybucja: "© <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a>"
+  # Podkład. Domyślnie wektorowa mapa OSM z OpenFreeMap (bez klucza, bez limitów); rastrowe
+  # podkłady z listy `podklady` są nakładane na nią przełącznikiem w panelu. Wszystkie serwery
+  # muszą wysyłać nagłówki CORS i akceptować stronę otwartą z dysku (file://, bez nagłówka
+  # Referer). Sprawdzone 10.2026: tile.openstreetmap.org takie żądania blokuje („403 Access
+  # blocked”), a CARTO wymaga już klucza API („API KEY REQUIRED”).
+  # Nieudane kafle rastrowe (błąd sieci, 404, 429, 5xx) mapa ponawia (domyślnie 3 próby, `proby`).
+  styl_bazowy:
+    nazwa: OpenStreetMap (OpenFreeMap)
+    url: https://tiles.openfreemap.org/styles/liberty
+    jezyk: pl          # etykiety: najpierw name:<jezyk>, potem nazwy ze stylu (null = bez zmian)
+  podklady:
+    - id: topo
+      nazwa: OpenTopoMap (poziomice)
+      kafle:
+        - https://a.tile.opentopomap.org/{z}/{x}/{y}.png
+        - https://b.tile.opentopomap.org/{z}/{x}/{y}.png
+        - https://c.tile.opentopomap.org/{z}/{x}/{y}.png
+      maxzoom: 17
+      atrybucja: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>, SRTM · © <a href="https://opentopomap.org" target="_blank">OpenTopoMap</a> (CC-BY-SA)'
+    - id: orto
+      nazwa: Ortofotomapa (Geoportal – bywa wolna)
+      kafle:   # WMS (usługa WMTS Geoportalu nie ma siatki EPSG:3857); StandardResolution ma pełne pokrycie
+        - https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/StandardResolution?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=Raster&STYLES=&FORMAT=image/jpeg&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256
+      # serwer losowo zwraca 404 albo pusty biały kafel (~2,4 KB) – więcej prób,
+      # a odpowiedź mniejszą niż min_bajtow też traktujemy jak nieudaną
+      proby: 5
+      min_bajtow: 3000
+      maxzoom: 19
+      atrybucja: 'Ortofotomapa © <a href="https://www.geoportal.gov.pl" target="_blank">GUGiK</a>'
+    - id: osm
+      nazwa: OpenStreetMap (oryginalny – może być zablokowany z dysku)
+      kafle:
+        - https://tile.openstreetmap.org/{z}/{x}/{y}.png
+      maxzoom: 19
+      atrybucja: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
   maplibre_wersja: 4.7.1

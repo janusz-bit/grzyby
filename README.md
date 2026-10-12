@@ -44,7 +44,7 @@ ze świeżą, `pogoda` ok. 3 min. Prawie cały czas `pogoda` to dławienie do
 `limit_wywolan_na_minute` = 550, czyli tuż poniżej limitu darmowego API Open-Meteo
 (600 wywołań/min). Każda z 575 lokalizacji z 38 dniami danych liczy się jako ok. 2,7 wywołania. Na zwykłym PC całość jest kilka
 razy szybsza. Mapę otwiera się bezpośrednio z dysku (`file://…/output/mapa.html`). Potrzebny jest
-internet, bo MapLibre GL ładuje się z CDN, a podkład to kafelki OSM. Wymagana przeglądarka
+internet, bo MapLibre GL ładuje się z CDN, a podkład to kafelki z danymi OSM. Wymagana przeglądarka
 z `DecompressionStream` (Chrome/Edge 80+, Firefox 113+, Safari 16.4+).
 
 Bez Nixa: Python ≥ 3.11 i `pip install geopandas pyogrio shapely pyproj pandas numpy requests pyyaml`,
@@ -67,7 +67,21 @@ i prosi o pełne przeliczenie.
 | [Bank Danych o Lasach](https://www.bdl.lasy.gov.pl/) | wydzielenia (geometria, siedlisko, składy gatunkowe, wiek, wysokość, ochronność) | paczki SHP+TXT z linków w `dane.txt`, pobierane do `data/raw/` |
 | [Open-Meteo](https://open-meteo.com/en/docs) (CC BY 4.0) | dzienne opady, Tmin, Tśr; godzinowa wilgotność gleby 3–9 cm | `/v1/forecast`, `past_days=30`, `forecast_days=8`, siatka co 5 km |
 | [GBIF](https://www.gbif.org/) | obserwacje 8 taksonów (rydz = 2 gatunki) | `/v1/occurrence/search` w prostokącie wokół nadleśnictw + 10 km |
-| [OpenStreetMap](https://www.openstreetmap.org/copyright) | podkład mapy | kafelki `tile.openstreetmap.org` |
+| [OpenStreetMap](https://www.openstreetmap.org/copyright) | podkład mapy (dane OSM) | domyślnie wektorowa mapa [OpenFreeMap](https://openfreemap.org) (styl „liberty”), do wyboru rastry: OpenTopoMap, [ortofotomapa Geoportalu](https://www.geoportal.gov.pl) (WMS) i oryginalny OSM |
+
+**Dlaczego domyślnie nie `tile.openstreetmap.org`.** Polityka korzystania z kafelków OSM wymaga
+nagłówka `Referer`, a strona otwarta z dysku (`file://`) go nie wysyła. Serwery OSM odpowiadają
+wtedy kafelkiem „403 Access blocked”, przynajmniej dla części przeglądarek i sieci. Popularne
+CARTO wymaga od 2026 klucza API (kafle „API KEY REQUIRED”). Domyślny podkład to więc OpenFreeMap:
+wektorowe kafle z danymi OSM, bez klucza i bez limitów, z nagłówkami CORS i akceptujące `file://`.
+Etykiety miejscowości i dróg są rysowane nad warstwą wydzieleń. Rastrowe podkłady są nakładane na
+mapę wektorową, której warstwy są wtedy ukryte. Gdy styl OpenFreeMap się nie wczyta, mapa
+korzysta tylko z rastrów i o tym informuje. Oryginalny OSM został w przełączniku: gdy jego serwer
+odrzuci kafle (401/403), mapa sama wraca do domyślnego podkładu. Nieudane kafle rastrowe (błąd
+sieci, 404, 429, 5xx) są ponawiane. WMS Geoportalu bywa niestabilny i losowo zwraca 404 albo pusty
+biały kafel, więc dla ortofotomapy jest 5 prób, a kafel mniejszy niż 3 KB też liczy się jako
+nieudany. Konfiguracja podkładów jest w `mapa.styl_bazowy` i `mapa.podklady` w `config.yaml`,
+a wybór zapamiętuje przeglądarka.
 
 `dane.txt` zawiera 16 z 28 nadleśnictw RDLP Białystok. Sześć z nich leży w woj.
 warmińsko-mazurskim (Borki, Czerwony Dwór, Drygały, Ełk, Giżycko, Gołdap), a brakuje części
@@ -207,7 +221,8 @@ badawcze 296, drzewostany nasienne 68, szkółki 51, plantacje nasienne 19.
 
 ### Krok 5 – mapa
 
-`output/mapa.html` to jeden plik ok. 16 MB. MapLibre GL 4.7.1 ładuje się z cdnjs, podkład to OSM.
+`output/mapa.html` to jeden plik ok. 16 MB. MapLibre GL 4.7.1 ładuje się z cdnjs, a podkład
+(domyślnie wektorowa mapa OSM z OpenFreeMap) wybiera się w panelu.
 Geometria jest uproszczona metodą *coverage simplify* (4 m, sąsiednie wydzielenia zachowują
 wspólne granice), przeliczona do EPSG:4326 i zaokrąglona do 1e-5° (~1 m). Współrzędne są
 zakodowane różnicowo, a cały zestaw danych (~59 MB JSON) skompresowany gzipem do 12 MB i osadzony
@@ -226,7 +241,8 @@ Na mapie są:
 - ostrzeżenie „potencjał, nie pewność” i data pogody widoczne także po zwinięciu panelu, a jeśli
   plik otwarto innego dnia niż dzień liczenia pogody, czerwona uwaga z prośbą o odświeżenie;
 - opcjonalna warstwa obserwacji GBIF dla wybranego gatunku;
-- regulowane krycie i lokalizacja GPS; na telefonie panel startuje zwinięty, a popup jest
+- przełącznik podkładu (OSM z OpenFreeMap, OpenTopoMap z poziomicami, ortofotomapa, oryginalny OSM),
+  regulowane krycie i lokalizacja GPS; na telefonie panel startuje zwinięty, a popup jest
   dolną kartą.
 
 ## Krok 6 – weryfikacja

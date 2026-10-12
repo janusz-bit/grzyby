@@ -5,7 +5,7 @@ Wskazówki dla agentów kodujących (Claude Code, Codex itp.) pracujących w tym
 ## Co to jest
 
 Pipeline w Pythonie, który z paczek Banku Danych o Lasach (BDL), pogody z Open-Meteo i obserwacji
-GBIF buduje jeden plik `output/mapa.html` (MapLibre GL z CDN, podkład OSM). Mapa pokazuje dla
+GBIF buduje jeden plik `output/mapa.html` (MapLibre GL z CDN, podkład z danymi OSM). Mapa pokazuje dla
 wydzieleń leśnych potencjał siedliskowy × wskaźnik pogodowy dla 7 gatunków grzybów. Opis modelu
 i wnioski z rozpoznania danych są w `README.md`, a pierwotne wymagania w `PLAN.md`.
 
@@ -76,6 +76,13 @@ i wnioski z rozpoznania danych są w `README.md`, a pierwotne wymagania w `PLAN.
 - Open-Meteo bez klucza ma limity 600 wywołań/min, 5000/h i 10000/dobę. Lokalizacja z ~38 dniami
   danych liczy się jako ~2,7 wywołania. Nie zwiększaj `limit_wywolan_na_minute` powyżej 600
   i nie wyłączaj cache.
+- Podkłady (`mapa.styl_bazowy` – wektorowy OpenFreeMap, `mapa.podklady` – rastry nakładane na
+  niego) muszą działać ze strony otwartej z dysku (`file://`, bez nagłówka `Referer`), wysyłać CORS
+  i nie wymagać klucza. `tile.openstreetmap.org` blokuje takie żądania (403 „Access blocked”),
+  a CARTO wymaga klucza („API KEY REQUIRED” na kaflu, przy statusie 200!). Nowy serwer sprawdź
+  przez `curl -H 'Origin: null'` (nagłówek `access-control-allow-origin`) i obejrzyj pobrany kafel.
+  Kafle rastrowe idą przez protokół `ponow://` (ponawianie w szablonie). Nasze warstwy wstawiamy
+  pod pierwszą warstwę symboli stylu wektorowego.
 - Mapa ma zawsze pokazywać ostrzeżenie, że prezentuje potencjał, a nie pewność, i nie służy do
   oceny jadalności. Nie usuwaj go ani nie osłabiaj.
 - Plik `output/mapa.html` ma mieć mniej niż 20 MB. Po zmianach w payloadzie sprawdź rozmiar

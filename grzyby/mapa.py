@@ -214,7 +214,8 @@ def render(cfg: dict, paths: Paths) -> None:
         "granice": static["granice"],
         "zbudowano": static["zbudowano"],
         "skala": mc["skala"],
-        "podklad": {"url": mc["podklad_url"], "atrybucja": mc["podklad_atrybucja"]},
+        "styl_bazowy": mc["styl_bazowy"],
+        "podklady": mc["podklady"],
         "pogoda_cfg": {
             "okno_opadu": cfg["pogoda"]["opady"]["okno_dni"],
             "okno_temp": cfg["pogoda"]["temperatura"]["okno_dni"],
