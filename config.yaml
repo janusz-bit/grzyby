@@ -1,0 +1,295 @@
+# Wszystkie progi i reguły modelu. Po zmianie:
+#   nix run .#mapa     – pełne przeliczenie (siedliska + pogoda + GBIF + mapa)
+#   nix run .#pogoda   – tylko pogoda i mapa (wystarczy po zmianie sekcji `pogoda` lub `sezon`)
+#
+# Krzywe zapisane jako lista punktów [x, y] są interpolowane liniowo,
+# a poza zakresem przyjmują wartość skrajnego punktu.
+
+dane:
+  bdl_lista: dane.txt            # linki do paczek BDL (jeden zip = jedno nadleśnictwo)
+  katalog_surowe: data/raw
+  katalog_robocze: data/work
+  katalog_wyniki: output
+  crs: EPSG:2180                 # ETRS89 / Poland CS92 – zgodne z .prj w paczkach BDL
+  kodowanie_txt: [utf-8, cp1250] # próbowane po kolei; paczki 2026 są w UTF-8
+
+# --- Skład drzewostanu -------------------------------------------------------
+drzewostan:
+  # Waga piętra przy liczeniu udziału żywiciela. Udziały w obrębie piętra sumują
+  # się do 10/10; piętra niewymienione (podszyt, nalot, zakrzewienia) są pomijane.
+  wagi_pieter:
+    DRZEW: 1.0     # warstwa drzew (drzewostan jednopiętrowy)
+    IP: 1.0        # piętro pierwsze
+    IIP: 0.6       # piętro drugie
+    PRZES: 0.3     # przestoje i nasienniki
+    PODRII: 0.3    # podrost o charakterze II piętra
+    PODR: 0.15     # podrost
+  udzial_mjs: 0.03 # kod MJS – „miejscami”, poniżej 5%
+  udzial_pjd: 0.02 # kod PJD – „pojedynczo”, poniżej 5%
+
+# Czynnik siedliska, gdy kodu siedliska nie ma w tabeli danego gatunku grzyba.
+domyslny_czynnik_siedliska: 0.4
+
+# --- Gatunki grzybów ---------------------------------------------------------
+# zywiciele:  kod gatunku drzewa z BDL -> waga (0–1). Najpierw szukany jest pełny
+#             kod (np. DB.C), potem rodzaj przed kropką (DB.S -> DB).
+# nasycenie:  ważony udział żywicieli (0–1), przy którym czynnik żywiciela = 1;
+#             mała wartość = wystarczy domieszka.
+# wiek:       krzywa [wiek_lat, czynnik] liczona dla wieku konkretnego żywiciela.
+# siedliska:  kod typu siedliskowego -> czynnik (0–1).
+# sezon:      miesiąc -> czynnik; brak miesiąca = poza sezonem (0).
+gatunki:
+  borowik:
+    nazwa: borowik szlachetny
+    lacina: Boletus edulis
+    gbif: [Boletus edulis]
+    zywiciele: {ŚW: 1.0, SO: 1.0, BK: 1.0, DB: 1.0, DB.C: 0.5, BRZ: 0.5, GB: 0.3, JD: 0.8}
+    nasycenie: 0.6
+    wiek: [[0, 0], [10, 0.05], [20, 0.3], [40, 1.0]]
+    siedliska: &bory_lasy_swieze
+      BŚW: 1.0
+      BMŚW: 1.0
+      LMŚW: 1.0
+      LŚW: 1.0
+      BMW: 0.6
+      LMW: 0.6
+      BW: 0.5
+      LW: 0.4
+      BS: 0.4
+      LŁ: 0.15
+      BB: 0.1
+      BMB: 0.1
+      LMB: 0.1
+      OL: 0.1
+      OLJ: 0.1
+    sezon: {6: 1, 7: 1, 8: 1, 9: 1, 10: 1}
+
+  podgrzybek:
+    nazwa: podgrzybek brunatny
+    lacina: Imleria badia
+    gbif: [Imleria badia]
+    zywiciele: {SO: 1.0, ŚW: 1.0, MD: 0.3}
+    nasycenie: 0.5
+    wiek: [[0, 0], [10, 0.1], [20, 1.0]]
+    siedliska:
+      BŚW: 1.0
+      BMŚW: 1.0
+      BW: 1.0
+      BMW: 1.0
+      LMŚW: 0.6
+      LMW: 0.5
+      BS: 0.5
+      LŚW: 0.3
+      LW: 0.3
+      LŁ: 0.1
+      BB: 0.15
+      BMB: 0.15
+      LMB: 0.1
+      OL: 0.1
+      OLJ: 0.1
+    sezon: {8: 1, 9: 1, 10: 1, 11: 1}
+
+  kozlarz_babka:
+    nazwa: koźlarz babka
+    lacina: Leccinum scabrum
+    gbif: [Leccinum scabrum]
+    zywiciele: {BRZ: 1.0}
+    nasycenie: 0.3           # brzoza jako domieszka 30% wystarcza do pełnej wartości
+    wiek: [[0, 0], [5, 0.5], [10, 1.0]]
+    siedliska:
+      BŚW: 1.0
+      BMŚW: 1.0
+      LMŚW: 1.0
+      LŚW: 1.0
+      BW: 0.9
+      BMW: 0.9
+      LMW: 0.9
+      LW: 0.8
+      BS: 0.6
+      LŁ: 0.2
+      BB: 0.2
+      BMB: 0.2
+      LMB: 0.2
+      OL: 0.15
+      OLJ: 0.1
+    sezon: {6: 1, 7: 1, 8: 1, 9: 1, 10: 1}
+
+  kozlarz_czerwony:
+    nazwa: koźlarz czerwony
+    lacina: Leccinum aurantiacum
+    gbif: [Leccinum aurantiacum]
+    zywiciele: {OS: 1.0, TP: 0.5}
+    nasycenie: 0.2           # osika zwykle występuje jako domieszka
+    wiek: [[0, 0], [5, 0.5], [10, 1.0]]
+    siedliska:
+      LŚW: 1.0
+      LMŚW: 1.0
+      BMŚW: 1.0
+      LW: 0.9
+      LMW: 0.9
+      BMW: 0.8
+      BŚW: 0.7
+      BW: 0.6
+      BS: 0.3
+      LŁ: 0.2
+      BB: 0.1
+      BMB: 0.15
+      LMB: 0.15
+      OL: 0.1
+      OLJ: 0.1
+    sezon: {6: 1, 7: 1, 8: 1, 9: 1, 10: 1}
+
+  maslak:
+    nazwa: maślak zwyczajny
+    lacina: Suillus luteus
+    gbif: [Suillus luteus]
+    zywiciele: {SO: 1.0, SO.WE: 0.3}
+    nasycenie: 0.6
+    wiek: [[0, 0], [5, 0.3], [10, 1.0], [30, 1.0], [50, 0.4], [80, 0.2]]
+    siedliska:
+      BS: 1.0
+      BŚW: 1.0
+      BMŚW: 0.6
+      BW: 0.4
+      BMW: 0.3
+      LMŚW: 0.3
+      LŚW: 0.2
+      LMW: 0.2
+      LW: 0.1
+      BB: 0.1
+      BMB: 0.1
+      LMB: 0.1
+      OL: 0.05
+      OLJ: 0.05
+      LŁ: 0.05
+    sezon: {6: 1, 7: 1, 8: 1, 9: 1, 10: 1, 11: 1}
+
+  rydz:
+    nazwa: rydz (mleczaj rydz / świerkowy)
+    lacina: Lactarius deliciosus / L. deterrimus
+    gbif: [Lactarius deliciosus, Lactarius deterrimus]
+    zywiciele: {SO: 1.0, ŚW: 1.0}   # L. deliciosus z sosną, L. deterrimus ze świerkiem
+    nasycenie: 0.5
+    wiek: [[0, 0], [5, 0.3], [10, 1.0], [30, 1.0], [50, 0.4], [80, 0.2]]
+    siedliska:
+      BŚW: 1.0
+      BMŚW: 1.0
+      BS: 0.6
+      BW: 0.5
+      BMW: 0.5
+      LMŚW: 0.5
+      LŚW: 0.3
+      LMW: 0.3
+      LW: 0.2
+      BB: 0.1
+      BMB: 0.1
+      LMB: 0.1
+      OL: 0.05
+      OLJ: 0.05
+      LŁ: 0.05
+    sezon: {8: 1, 9: 1, 10: 1}
+
+  kurka:
+    nazwa: pieprznik jadalny (kurka)
+    lacina: Cantharellus cibarius
+    gbif: [Cantharellus cibarius]
+    zywiciele: {SO: 1.0, ŚW: 1.0, BK: 1.0, DB: 1.0, DB.C: 0.3, GB: 0.3, BRZ: 0.3}
+    nasycenie: 0.6
+    wiek: [[0, 0], [10, 0.1], [20, 1.0]]
+    siedliska:              # ubogie, kwaśne siedliska borowe i mieszane
+      BŚW: 1.0
+      BMŚW: 1.0
+      BS: 0.8
+      BW: 0.7
+      BMW: 0.7
+      LMŚW: 0.6
+      LMW: 0.4
+      LŚW: 0.3
+      LW: 0.2
+      BB: 0.15
+      BMB: 0.15
+      LMB: 0.1
+      OL: 0.05
+      OLJ: 0.05
+      LŁ: 0.05
+    sezon: {6: 1, 7: 1, 8: 1, 9: 1}
+
+# --- Wykluczenia („niedostępne”) ----------------------------------------------
+wykluczenia:
+  # funkcja lasu (f_subarea.forest_func_cd) -> opis
+  funkcje_lasu:
+    REZ: rezerwat przyrody
+    REZ CZ: rezerwat przyrody (ochrona częściowa)
+    REZ Ś: rezerwat przyrody (ochrona ścisła)
+  # kategoria ochronności (f_arod_category.prot_category_cd) -> opis.
+  # Art. 26 ust. 2 ustawy o lasach: stały zakaz wstępu do upraw do 4 m,
+  # powierzchni doświadczalnych, drzewostanów nasiennych i ostoi zwierząt.
+  kategorie_ochronnosci:
+    OCH OSTOJ: ostoja zwierząt – stały zakaz wstępu
+    OCH NAS: drzewostan nasienny – stały zakaz wstępu
+    OCH BADAW: powierzchnia badawcza/doświadczalna – stały zakaz wstępu
+  # Uprawa: najwyższa wysokość gatunku w piętrze górnym (DRZEW/IP) <= próg.
+  # Gdy BDL nie podaje wysokości – wiek < próg wieku.
+  uprawa_max_wysokosc_m: 4
+  uprawa_max_wiek_lat: 10
+  # Powierzchnie nieleśne: rodzaj powierzchni z flagą type_fl = 'N' w słowniku
+  # f_area_type_dic (grunty rolne, wody, zabudowa, bagna, zadrzewienia...).
+  nielesne_flaga: N
+
+# --- Pogoda (Open-Meteo) -----------------------------------------------------
+pogoda:
+  url: https://api.open-meteo.com/v1/forecast
+  siatka_km: 5
+  dni_wstecz: 30
+  dni_prognozy: 7
+  horyzonty_dni: [0, 3, 7]       # dziś, +3, +7
+  strefa_czasowa: Europe/Warsaw
+  # Zmienne Open-Meteo (nazwy z https://open-meteo.com/en/docs)
+  zmienne_dzienne: [precipitation_sum, temperature_2m_min, temperature_2m_mean]
+  wilgotnosc_gleby: soil_moisture_3_to_9cm   # zmienna godzinowa, uśredniana do doby; null = wyłącz
+  punktow_na_zapytanie: 50
+  limit_wywolan_na_minute: 400   # darmowe API: 600/min, 5000/h, 10000/dobę
+  cache_godzin: 3                # ponowne uruchomienie w tym czasie nie pobiera danych
+
+  opady:
+    okno_dni: 14
+    krzywa_mm: [[0, 0.0], [15, 0.25], [40, 1.0]]   # <15 mm słabo, 15–40 rośnie, >40 pełna
+    # Wysyp zwykle 7–14 dni po obfitym deszczu: premia, jeśli w tym oknie
+    # suma z `okno_zdarzenia_dni` kolejnych dni przekroczyła próg.
+    wysyp_opoznienie_dni: [7, 14]
+    wysyp_okno_zdarzenia_dni: 2
+    wysyp_prog_mm: 15
+    wysyp_premia: 0.15
+  gleba:
+    waga: 0.3                       # udział wilgotności gleby w czynniku wilgoci
+    krzywa_m3m3: [[0.10, 0.0], [0.20, 0.6], [0.30, 1.0]]
+  temperatura:
+    okno_dni: 7
+    krzywa_c: [[0, 0.0], [5, 0.15], [10, 1.0], [20, 1.0], [25, 0.15], [30, 0.0]]
+  przymrozek:
+    prog_c: -1.0                    # Tmin poniżej progu...
+    okno_dni: 5                     # ...w ostatnich N dniach
+    mnoznik: 0.25
+
+# --- GBIF (weryfikacja) ------------------------------------------------------
+gbif:
+  url: https://api.gbif.org/v1
+  bufor_km: 10                 # zasięg wyszukiwania wokół nadleśnictw
+  max_na_takson: 3000
+  max_niepewnosc_m: 1000       # odrzuć obserwacje z większą niepewnością położenia
+  dopasowanie_m: 200           # punkt poza wydzieleniem: weź najbliższe wydzielenie leśne w tym promieniu
+  prog_wysoki: 0.5             # „wysoki potencjał siedliskowy”
+
+# --- Mapa --------------------------------------------------------------------
+mapa:
+  plik: mapa.html
+  uproszczenie_m: 4            # tolerancja upraszczania geometrii (EPSG:2180)
+  precyzja: 5                  # miejsca po przecinku w EPSG:4326 (1e-5° ≈ 1 m)
+  min_pole_m2: 50              # pomijaj okruchy geometrii po uproszczeniu
+  # Skala sekwencyjna (jeden odcień, jasny -> ciemny) dla potencjał × pogoda (0–1).
+  # Pomarańcz/brąz zamiast zieleni, żeby nie zlewała się z lasami na podkładzie OSM.
+  skala: [[0.0, "#fff5eb"], [0.1, "#fdd0a2"], [0.25, "#fdae6b"], [0.4, "#fd8d3c"], [0.6, "#e6550d"], [0.8, "#a63603"]]
+  # Podkład (OSM). Biblioteka MapLibre GL ładowana z CDN.
+  podklad_url: https://tile.openstreetmap.org/{z}/{x}/{y}.png
+  podklad_atrybucja: "© <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a>"
+  maplibre_wersja: 4.7.1
