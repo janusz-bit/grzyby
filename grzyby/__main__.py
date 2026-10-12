@@ -27,10 +27,10 @@ def full(cfg: dict, paths: Paths, force_weather: bool) -> None:
 
 
 def check_grid(cfg: dict, paths: Paths) -> None:
+    """Przed (kilkuminutowym) pobieraniem pogody: czy dane statyczne pasują do siatki i configu."""
     if not paths.static_payload.exists() or not paths.grid.exists():
         raise SystemExit("brak danych statycznych – najpierw uruchom pełny pipeline (nix run .#mapa)")
-    if read_json(paths.grid)["krok_m"] != cfg["pogoda"]["siatka_km"] * 1000.0:
-        raise SystemExit("zmieniono pogoda.siatka_km – uruchom pełny pipeline (nix run .#mapa)")
+    mapa.check_static(cfg, read_json(paths.static_payload), read_json(paths.grid))
 
 
 def main() -> None:

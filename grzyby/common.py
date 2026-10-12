@@ -100,6 +100,23 @@ def grid_signature(nodes: list) -> str:
     return hashlib.sha1(json.dumps(nodes).encode()).hexdigest()[:16]
 
 
+def model_signature(cfg: dict) -> str:
+    """Podpis części configu, z której powstają dane statyczne mapy (siedliska, wykluczenia,
+    geometria, siatka). Sezony, nazwy i cała sekcja pogody poza siatką go nie zmieniają."""
+    import hashlib
+
+    species = {k: {kk: vv for kk, vv in v.items() if kk not in ("sezon", "nazwa", "lacina", "gbif")}
+               for k, v in cfg["gatunki"].items()}
+    rel = {
+        "gatunki": species, "drzewostan": cfg["drzewostan"],
+        "siedlisko_domyslne": cfg["domyslny_czynnik_siedliska"],
+        "wykluczenia": cfg["wykluczenia"], "ostrzezenia": cfg.get("ostrzezenia", {}),
+        "mapa": {k: cfg["mapa"][k] for k in ("uproszczenie_m", "precyzja", "min_pole_m2")},
+        "crs": cfg["dane"]["crs"], "siatka_km": cfg["pogoda"]["siatka_km"],
+    }
+    return hashlib.sha1(json.dumps(rel, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
+
+
 def write_json(path: Path, obj) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     with open(tmp, "w", encoding="utf-8") as fh:

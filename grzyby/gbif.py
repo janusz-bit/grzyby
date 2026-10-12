@@ -110,7 +110,7 @@ def evaluate(cfg: dict, paths: Paths, stands: gpd.GeoDataFrame, rows: list[dict]
             "odsetek_wysoki_z_buforem": obs_share,
             "odsetek_powierzchni_wysoki": round(base_share, 3),
             "lift": None if obs_share is None or base_share == 0 else round(obs_share / base_share, 2),
-            "mala_proba": len(matched) < 10,
+            "mala_proba": len(matched) < gc["min_proba"],
             "sredni_potencjal_obserwacji": None if matched.empty else round(float(matched[f"p_{k}"].mean()), 3),
             "sredni_potencjal_lasu": round(float(np.average(forest[f"p_{k}"], weights=area)), 3),
         }
@@ -119,8 +119,8 @@ def evaluate(cfg: dict, paths: Paths, stands: gpd.GeoDataFrame, rows: list[dict]
             f"≤{gc['dopasowanie_m']} m); w wysokim potencjale {r['odsetek_wysoki_z_buforem']} "
             f"vs {r['odsetek_powierzchni_wysoki']} powierzchni lasu")
 
-    # punkty do warstwy na mapie
-    pts4326 = j.to_crs(4326)
+    # punkty do warstwy na mapie – tylko z niepewnością położenia ≤ max_niepewnosc_m
+    pts4326 = j[j["precyzyjna"]].to_crs(4326)
     report["punkty"] = [
         {"g": r.gatunek, "t": r.takson, "lon": round(r.geometry.x, 5), "lat": round(r.geometry.y, 5),
          "d": (r.eventDate or "")[:10], "u": None if pd.isna(r.coordinateUncertaintyInMeters) else int(r.coordinateUncertaintyInMeters),

@@ -15,7 +15,7 @@
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   html, body { margin: 0; height: 100%; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--surface); }
-  #map { position: absolute; inset: 0; }
+  #map { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
   #panel {
     position: absolute; top: 10px; left: 10px; z-index: 2; width: 340px; max-width: calc(100vw - 20px);
     max-height: calc(100vh - 20px); overflow: auto; background: var(--surface); border: 1px solid var(--line);
@@ -53,7 +53,7 @@
   .sw.punkt { width: 10px; height: 10px; border-radius: 50%; background: var(--gbif); border: 0; }
   .meta { font-size: 11.5px; color: var(--ink-3); margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
   .meta a { color: inherit; }
-  #ladowanie { position: absolute; inset: 0; display: grid; place-items: center; z-index: 5; background: rgba(252,252,251,.85); font-size: 16px; color: var(--ink-2); padding: 20px; text-align: center; }
+  #ladowanie { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: grid; place-items: center; z-index: 5; background: rgba(252,252,251,.85); font-size: 16px; color: var(--ink-2); padding: 20px; text-align: center; }
   .maplibregl-popup { z-index: 3; }  /* popup nad panelem */
   .maplibregl-popup-content { max-width: min(380px, calc(100vw - 40px)); max-height: 60vh; overflow: auto; font-size: 13px; padding: 10px 12px; }
   .pp h3 { margin: 0 0 2px; font-size: 14px; }
@@ -206,7 +206,7 @@ function kreski() {
   return x.getImageData(0, 0, s, s);
 }
 
-function odswiezMape() {
+function odswiezMape({ popupTez = true } = {}) {
   if (map && map.getLayer("pot")) {
     map.setPaintProperty("pot", "fill-color", kolorExpr());
     map.setPaintProperty("pot", "fill-opacity", state.krycie);
@@ -214,7 +214,8 @@ function odswiezMape() {
     map.setLayoutProperty("gbif", "visibility", state.gbif ? "visible" : "none");
     map.setFilter("gbif", state.sp === "any" ? null : ["==", ["get", "g"], state.sp]);
   }
-  if (popup && popup.isOpen() && popup._i != null) popup.setHTML(popupHtml(popup._i));
+  // treść popupu zależy od gatunku, dnia i trybu – nie od krycia ani warstwy GBIF
+  if (popupTez && popup && popup.isOpen() && popup._i != null) popup.setHTML(popupHtml(popup._i));
 }
 
 function zaznacz(i) {
@@ -248,8 +249,8 @@ function zbudujPanel() {
   const ts = document.getElementById("tylkoSiedlisko"), gb = document.getElementById("gbif"), kr = document.getElementById("krycie");
   state.tylkoSiedlisko = ts.checked; state.gbif = gb.checked; state.krycie = +kr.value;
   ts.onchange = e => { state.tylkoSiedlisko = e.target.checked; aktualizujPanel(); odswiezMape(); };
-  kr.oninput = e => { state.krycie = +e.target.value; odswiezMape(); };
-  gb.onchange = e => { state.gbif = e.target.checked; odswiezMape(); };
+  kr.oninput = e => { state.krycie = +e.target.value; odswiezMape({ popupTez: false }); };
+  gb.onchange = e => { state.gbif = e.target.checked; odswiezMape({ popupTez: false }); };
 
   const panel = document.getElementById("panel"), zwin = document.getElementById("zwin");
   const ustawZwiniety = z => {
@@ -274,7 +275,8 @@ function zbudujPanel() {
   }
   document.getElementById("meta").innerHTML =
     `Pogoda: ${esc(POGODA.zrodlo)}, pobrano ${esc(POGODA.pobrano.replace("T", " "))}. ` +
-    `Dni „+3”/„+7” liczone z prognozy – im dalej, tym mniej pewne.<br>` +
+    (POGODA.horyzonty.some(h => h.prognoza)
+      ? `Dni ${POGODA.horyzonty.filter(h => h.prognoza).map(h => "„+" + h.h + "”").join("/")} liczone z prognozy – im dalej, tym mniej pewne.` : "") + "<br>" +
     `Drzewostany: Bank Danych o Lasach (bdl.lasy.gov.pl), stan 2026; dane przetworzone. ` +
     `Obserwacje: GBIF.org. Podkład: © OpenStreetMap. Mapę zbudowano ${esc(META.zbudowano.replace("T", " "))}.`;
   aktualizujPanel();
@@ -354,7 +356,7 @@ function popupHtml(i) {
     Tmin ${pc.okno_mrozu} dni ${fmt(S.t_min[g], 1)}°C${S.f_mroz[g] < 1 ? ` – przymrozek ×${fmt(S.f_mroz[g])}` : ""};
     sezon (${MIES[m]}): ${sez > 0 ? "tak" : "<b>poza sezonem → 0</b>"}.
     Wskaźnik pogodowy: <b>${fmt(pogodaWezel(j, g) * sez)}</b>.</p>`;
-  const domieszka = v100("uf") > Math.min(1, v100("hs") / gt.nasycenie) + 0.005 ? " (reguła domieszki)" : "";
+  const domieszka = F["dm_" + k][i] ? " (reguła domieszki)" : "";
   const siedliskoTxt = `<p><b>Siedlisko</b> (${esc(gt.nazwa)}): żywiciele ${zywicieleTxt(i, gt)}
     → udział ważony ${fmt(v100("hs"))} ÷ nasycenie ${fmt(gt.nasycenie, 1)} → ${fmt(v100("uf"))}${domieszka} (maks. 1);
     × wiek ${fmt(v100("af"))} → ${fmt(v100("hz"))};
@@ -368,7 +370,7 @@ function popupHtml(i) {
     <dl>
       <dt>Rodzaj</dt><dd>${esc(D.rodzaje_nazwy[F.area[i]] || D.rodzaje[F.area[i]])}${F.ha[i] >= 0 ? `, ${fmt(F.ha[i] / 100)} ha` : ""}</dd>
       <dt>Siedlisko</dt><dd>${site ? `${esc(site)} – ${esc(siteName)}` : "–"}</dd>
-      <dt>Wiek</dt><dd>${F.age[i] >= 0 ? `${F.age[i]} lat (${esc(F.lead[i])})` : "–"}${F.hgt[i] >= 0 ? `, wys. śr. ${F.hgt[i]} m` : ""}</dd>
+      <dt>Wiek</dt><dd>${F.age[i] >= 0 ? `${F.age[i]} lat (${esc(F.lead[i])})` : "–"}${F.hgt[i] >= 0 ? `, wys. śr. ${fmt(F.hgt[i] / 10, 1)} m` : ""}</dd>
       <dt>Skład</dt><dd>${sklad(i)}</dd>
       ${D.ochronnosc[F.prot[i]] ? `<dt>Ochronność</dt><dd>${esc(D.ochronnosc[F.prot[i]])}</dd>` : ""}
     </dl>
@@ -444,7 +446,7 @@ async function start() {
   map.once("idle", () => { window.__mapaGotowa = true; });
 
   // jeden popup, zamykany ręcznie (closeOnClick: false), żeby kliknięcie innego wydzielenia go przenosiło
-  popup = new maplibregl.Popup({ maxWidth: "min(400px, calc(100vw - 30px))", closeOnClick: false });
+  popup = new maplibregl.Popup({ maxWidth: "min(400px, calc(100vw - 30px))", closeOnClick: false, focusAfterOpen: false });
   popup.on("close", () => { popup._i = null; zaznacz(null); });
   const pokaz = (lngLat, html, i) => {
     popup._i = i;

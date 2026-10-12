@@ -10,6 +10,12 @@ z GBIF buduje **jeden plik `output/mapa.html`**: mapę wydzieleń leśnych pokol
 
 ![zrzut mapy](docs/zrzut.png)
 
+<details><summary>Popup wydzielenia z uzasadnieniem</summary>
+
+![popup](docs/zrzut_popup.png)
+
+</details>
+
 ## Uruchomienie
 
 Wymagany Nix z flakes. Wszystkie komendy uruchamiaj w katalogu repozytorium (stąd brane są
@@ -34,9 +40,9 @@ python -m grzyby zrzut        # wymaga chromium w PATH
 ```
 
 Orientacyjne czasy na Raspberry Pi 4: pełny pipeline ok. 7 min z pogodą z cache i ok. 11 min
-ze świeżą, `pogoda` ok. 3–5 min. Prawie cały czas `pogoda` to dławienie do limitu darmowego API
-Open-Meteo (600 wywołań/min, a każda z 575 lokalizacji z 38 dniami danych liczy się jako
-ok. 2,7 wywołania). Na zwykłym PC całość jest kilka
+ze świeżą, `pogoda` ok. 3–4 min. Prawie cały czas `pogoda` to dławienie do
+`limit_wywolan_na_minute` = 550, czyli tuż poniżej limitu darmowego API Open-Meteo
+(600 wywołań/min). Każda z 575 lokalizacji z 38 dniami danych liczy się jako ok. 2,7 wywołania. Na zwykłym PC całość jest kilka
 razy szybsza. Mapę otwiera się bezpośrednio z dysku (`file://…/output/mapa.html`). Potrzebny jest
 internet, bo MapLibre GL ładuje się z CDN, a podkład to kafelki OSM. Wymagana przeglądarka
 z `DecompressionStream` (Chrome/Edge 80+, Firefox 113+, Safari 16.4+).
@@ -50,7 +56,9 @@ Wszystkie progi i reguły są w [`config.yaml`](config.yaml): żywiciele i ich w
 tabele siedlisk, sezony, progi opadu i temperatury, przymrozek, premia za „wysyp”, wykluczenia,
 siatka pogodowa, parametry GBIF i mapy. Zmiany w sekcji `pogoda` (poza `siatka_km`) lub w `sezon`
 gatunków wystarczy przeliczyć przez `nix run .#pogoda`. Zmiany w regułach siedliskowych,
-wykluczeniach i siatce wymagają `nix run .#mapa`, a etap `pogoda` sam to wykrywa.
+wykluczeniach, geometrii i siatce wymagają `nix run .#mapa`. Dane statyczne mapy zapisują podpis
+tych sekcji configu, więc `pogoda` w takiej sytuacji przerywa od razu, jeszcze przed pobieraniem,
+i prosi o pełne przeliczenie.
 
 ## Dane
 
@@ -76,9 +84,10 @@ zgłosić na bdl@bdl.lasy.gov.pl. Surowe dane i wyniki (`data/`, `output/`) nie 
 Pełny raport z realnymi wartościami kodów generuje `python -m grzyby rozpoznanie` do
 `output/rozpoznanie.md`. Kopia dla paczek 2026 leży w [`docs/rozpoznanie.md`](docs/rozpoznanie.md). Najważniejsze ustalenia:
 
-- **Układ współrzędnych**: `.prj` to ESRI-owy opis `ETRS_1989_Poland_CS92`. Parametry są identyczne
-  z **EPSG:2180**, choć pyproj rozpoznaje go jako „ETRF2000-PL / CS92” i nie przypisuje kodu przy
-  domyślnej pewności. Pipeline sprawdza parametry i ustawia EPSG:2180.
+- **Układ współrzędnych**: `.prj` to ESRI-owy opis `ETRS_1989_Poland_CS92` o parametrach
+  identycznych z **EPSG:2180**. PROJ 9.9 z flake'a rozpoznaje go wprost jako EPSG:2180
+  („ETRS89 / PL-1992”). Starszy PROJ, np. z kół z PyPI, widzi „ETRF2000-PL / CS92” bez kodu EPSG,
+  dlatego pipeline porównuje parametry odwzorowania i jawnie ustawia EPSG:2180.
 - **Kodowanie**: wszystkie pliki tekstowe są w **UTF-8**, a nie CP1250 (`.cpg` = UTF-8). CP1250
   zostało jako zapasowe kodowanie w `config.yaml`.
 - **Skala**: 134 964 wydzielenia w `f_subarea.txt`, 113 435 poligonów w `G_SUBAREA`. Drogi,
@@ -147,8 +156,10 @@ potencjał     = czynnik_udz. × czynnik_wieku × czynnik_siedliska(typ_siedlisk
 
 Odstępstwa od reguł startowych z planu: borowik dostał 0,9 na wilgotnych wariantach borów i lasów
 mieszanych (plan wymienia „bory mieszane, lasy mieszane” bez zawężenia), maślak i rydz mają łagodny
-spadek po 30 latach zamiast ostrego cięcia, a wszystkie gatunki mają kilka słabszych żywicieli
-spoza planu (np. jodła i grab dla borowika). Wszystko to można zmienić w `config.yaml`.
+spadek po 30 latach zamiast ostrego cięcia, a borowik, podgrzybek, koźlarz czerwony i kurka mają
+kilka słabszych żywicieli spoza planu (jodła i grab dla borowika, modrzew dla podgrzybka, topola
+dla koźlarza czerwonego, grab i brzoza dla kurki). Wejmutka (`SO.WE`) ma wagi ustawione jawnie,
+bo inaczej dostałaby przez rodzaj pełną wagę sosny. Wszystko to można zmienić w `config.yaml`.
 
 ### Krok 3 – wskaźnik pogodowy (0–1)
 
@@ -157,8 +168,8 @@ Każde wydzielenie dostaje najbliższy węzeł siatki. Wskaźnik liczy się na d
 Dni +3 i +7 korzystają z prognozy Open-Meteo.
 
 ```
-opad      = krzywa(Σ opadu z 14 dni: 0 mm→0, 15 mm→0,25, 40 mm→1)
-            + 0,15, jeśli w oknie 7–14 dni wcześniej spadło ≥ 15 mm w 2 kolejne dni (początek wysypu)
+opad      = min(1, krzywa(Σ opadu z 14 dni: 0 mm→0, 15 mm→0,25, 40 mm→1)
+                   + 0,15, jeśli w oknie 7–14 dni wcześniej spadło ≥ 15 mm w 2 kolejne dni)
 wilgoć    = 0,7 × opad + 0,3 × krzywa(wilgotność gleby 3–9 cm: 0,10→0, 0,20→0,6, 0,30→1)
 temp      = krzywa(średnia T z 7 dni: <5°C słabo, 10–20°C = 1, >25°C słabo)
 mróz      = 0,25, jeśli Tmin < −1°C w ostatnich 5 dniach, inaczej 1
@@ -181,16 +192,17 @@ Gdy wydzielenie spełnia kilka warunków, liczy się pierwszy z listy:
    i doświadczalne (`OCH BADAW`);
 3. **plantacje nasienne i szkółki** (`PLANT NAS`, `SZK LEŚNA` – rodzaj powierzchni);
 4. **uprawy leśne do 4 m**: średnia wysokość piętra górnego ważona udziałami ≤ 4 m. Maksimum
-   nie wystarcza, bo 10% szybko rosnącej brzozy „ukrywałoby” młodą uprawę. Gdy brak wysokości,
-   wiek gatunku panującego < 10 lat;
+   nie wystarcza, bo 10% szybko rosnącej brzozy „ukrywałoby” młodą uprawę. BDL nie podaje
+   wysokości głównie 2–5-letnich drzewek, więc gatunki < 10 lat bez wysokości liczą się jako 1 m.
+   Gdy wysokości nie ma wcale, decyduje wiek gatunku panującego < 10 lat;
 5. **powierzchnie nieleśne**: `type_fl = N`.
 
 Źródlisk i obszarów zagrożonych erozją (art. 26 ust. 2 pkt 4–5) BDL nie oznacza. Lasy obronne
 (`OCH OBR`, m.in. ok. 9,7 tys. ha w Drygałach, prawdopodobnie teren wojskowy) i glebochronne
 (`OCH GLEB`) nie są wykluczone, ale popup pokazuje przy nich ostrzeżenie.
 
-W obecnych danych (112 892 wydzielenia z geometrią) 81 583 jest dostępnych. Wykluczone:
-nieleśne 14 538, uprawy 5 492, rezerwaty 4 899 + 1 831 (częściowe), ostoje 4 115, powierzchnie
+W obecnych danych (112 892 wydzielenia z geometrią) 81 484 jest dostępnych. Wykluczone:
+nieleśne 14 538, uprawy 5 591, rezerwaty 4 899 + 1 831 (częściowe), ostoje 4 115, powierzchnie
 badawcze 296, drzewostany nasienne 68, szkółki 51, plantacje nasienne 19.
 
 ### Krok 5 – mapa
@@ -221,10 +233,11 @@ Na mapie są:
 
 ### GBIF (sanity check, nie trening)
 
-W prostokącie wokół nadleśnictw (+10 km) GBIF ma 373 obserwacje tych gatunków. Większość (325) leży
-poza lasami z BDL: w parkach narodowych, lasach prywatnych i na Litwie lub Białorusi. Do wydzieleń
-leśnych trafia 36, a 12 kolejnych do najbliższego wydzielenia w promieniu 200 m (bufor na
-niepewność położenia). Wyniki dla progu „wysokiego potencjału” ≥ 0,5:
+W prostokącie wokół nadleśnictw (+10 km) GBIF ma 373 obserwacje tych gatunków. 333 z nich ma
+niepewność położenia ≤ 1000 m (`max_niepewnosc_m`), tylko te trafiają do statystyk i na mapę.
+Większość (289) leży poza lasami z BDL: w parkach narodowych, lasach prywatnych i na Litwie lub
+Białorusi. Do wydzieleń leśnych trafia 33, a 11 kolejnych do najbliższego wydzielenia w promieniu
+200 m (bufor na niepewność położenia). Wyniki dla progu „wysokiego potencjału” ≥ 0,5:
 
 | gatunek | obs. w wydz. (+≤200 m) | w wysokim potencjale | udział powierzchni lasu o wysokim potencjale | lift | średni potencjał: obserwacje / las |
 |---|---:|---:|---:|---:|---:|
@@ -251,7 +264,7 @@ punktach nie da się jednak rozstrzygnąć, czy to wada reguły. Szczegóły zap
 standardowej). Test czeka na rozpakowanie danych i bezczynność mapy, liczy wyrenderowane wydzielenia,
 zbiera błędy JS, sprawdza, czy nakładka ładowania zniknęła, klika dwa różne wydzielenia (popup
 ma się przenieść) i zapisuje `output/zrzut.png`, `output/zrzut_popup.png` i
-`output/zrzut_raport.json`. Ostatni przebieg: 55 549 wyrenderowanych wydzieleń + 15 609
+`output/zrzut_raport.json`. Ostatni przebieg: 55 460 wyrenderowanych wydzieleń + 15 698
 wykluczonych w widoku startowym, popup przenosi się poprawnie, 0 błędów JS. Ręcznie sprawdzono
 też widok telefonu (390×844) i przełączanie gatunku, dnia, trybu i warstwy GBIF. Na Raspberry Pi
 z renderowaniem programowym (SwiftShader) ładowanie trwa ok. 90 s, na zwykłym komputerze kilka

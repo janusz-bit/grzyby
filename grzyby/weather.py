@@ -11,7 +11,7 @@ import numpy as np
 import requests
 from pyproj import Transformer
 
-from .common import Paths, curve, log, read_json, species_keys, write_json
+from .common import Paths, curve, grid_signature, log, read_json, species_keys, write_json
 
 
 # --- siatka ------------------------------------------------------------------
@@ -55,6 +55,12 @@ class RateLimiter:
             time.sleep(max(0.5, 60 - (now - self.events[0][0]) + 0.1))
 
 
+def _covers_horizons(dates: list[str], pc: dict) -> bool:
+    """Czy dane obejmują dziś i wszystkie horyzonty (po północy cache przestaje je obejmować)."""
+    today = dt.datetime.now(ZoneInfo(pc["strefa_czasowa"])).date()
+    return all((today + dt.timedelta(days=h)).isoformat() in dates for h in pc["horyzonty_dni"])
+
+
 def fetch(cfg: dict, paths: Paths, force: bool = False) -> dict:
     pc = cfg["pogoda"]
     grid = read_json(paths.grid)
@@ -62,13 +68,13 @@ def fetch(cfg: dict, paths: Paths, force: bool = False) -> dict:
     if paths.weather_raw.exists() and not force:
         cached = read_json(paths.weather_raw)
         age_h = (time.time() - cached["pobrano_ts"]) / 3600
-        today = dt.datetime.now(ZoneInfo(pc["strefa_czasowa"])).date()
-        # cache sprzed północy nie obejmuje już „dziś + najdalszy horyzont”
-        same_day = cached["pobrano"][:10] == today.isoformat()
-        if (age_h < pc["cache_godzin"] and same_day and cached["wezly"] == nodes
+        if (age_h < pc["cache_godzin"] and _covers_horizons(cached["daty"], pc) and cached["wezly"] == nodes
                 and cached["parametry"] == _params_sig(pc)):
             log(f"pogoda z cache ({age_h:.1f} h temu); użyj --force, aby pobrać ponownie")
             return cached
+
+    started_ts = time.time()
+    started = dt.datetime.now(ZoneInfo(pc["strefa_czasowa"])).isoformat(timespec="minutes")
 
     n_days = pc["dni_wstecz"] + pc["dni_prognozy"] + 1
     n_vars = len(pc["zmienne_dzienne"]) + (1 if pc.get("wilgotnosc_gleby") else 0)
@@ -103,10 +109,13 @@ def fetch(cfg: dict, paths: Paths, force: bool = False) -> dict:
         results.extend(data if isinstance(data, list) else [data])
         log(f"Open-Meteo: {min(start + chunk, len(nodes))}/{len(nodes)} punktów")
 
+    # pobieranie przez północ: późniejsze paczki mają zakres dat przesunięty o dzień
+    if any(res["daily"]["time"] != results[0]["daily"]["time"] for res in results):
+        raise RuntimeError("Open-Meteo: paczki mają różne zakresy dat (pobieranie przez północ?) – uruchom ponownie")
     daily_vars = pc["zmienne_dzienne"]
     out = {
-        "pobrano_ts": time.time(),
-        "pobrano": dt.datetime.now(ZoneInfo(pc["strefa_czasowa"])).isoformat(timespec="minutes"),
+        "pobrano_ts": started_ts,
+        "pobrano": started,
         "parametry": _params_sig(pc),
         "wezly": nodes,
         "daty": results[0]["daily"]["time"],
@@ -203,6 +212,7 @@ def compute_index(raw: dict, cfg: dict, paths: Paths) -> dict:
         "pobrano": raw["pobrano"],
         "dzis": today.isoformat(),
         "strefa": pc["strefa_czasowa"],
+        "siatka_podpis": grid_signature(raw["wezly"]),
         "zrodlo": "Open-Meteo (open-meteo.com), CC BY 4.0",
         "horyzonty": horizons,
     }

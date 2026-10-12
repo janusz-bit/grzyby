@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import shapely
 
-from .common import Paths, grid_signature, log, read_json, species_keys, write_json
+from .common import Paths, grid_signature, log, model_signature, read_json, species_keys, write_json
 
 STOREY_LABELS = {"DRZEW": "", "IP": "I p.", "IIP": "II p.", "PRZES": "przestoje",
                  "PODRII": "podrost II p.", "PODR": "podrost"}
@@ -137,12 +137,13 @@ def build_static(cfg: dict, paths: Paths, stands: gpd.GeoDataFrame, grid_idx: np
         "geom": geoms,
         "n": nadl_i, "adr": df["adres"].tolist(), "area": area_i, "site": site_i, "prot": prot_i,
         "ha": _ints(df["area_ha"], 100), "ex": excl_i, "g": df["g"].astype(int).tolist(),
-        "age": _ints(df["lead_age"]), "hgt": _ints(df["top_height"]), "lead": df["lead_species"].fillna("").tolist(),
+        "age": _ints(df["lead_age"]), "hgt": _ints(df["top_height"], 10), "lead": df["lead_species"].fillna("").tolist(),
         "comp": comp, "ws": ws, "warn": warn_i,
     }
     for k in keys:  # składniki potencjału ×100 (opis w habitat.host_scores)
         for c in ("p", "hs", "uf", "af", "hz", "sf"):
             feats[f"{c}_{k}"] = _ints(df[f"{c}_{k}"], 100, 0)
+        feats[f"dm_{k}"] = df[f"dm_{k}"].fillna(0).astype(int).tolist()
 
     payload = {
         "skala_wsp": scale,
@@ -162,10 +163,21 @@ def build_static(cfg: dict, paths: Paths, stands: gpd.GeoDataFrame, grid_idx: np
         "zbudowano": dt.datetime.now().isoformat(timespec="minutes"),
         "liczba": len(df), "granice": bounds,
         "siatka_podpis": grid_signature(read_json(paths.grid)["wezly"]),
+        "model_podpis": model_signature(cfg),
         "b64": b64,
     })
     log(f"mapa: dane statyczne {len(raw) / 1e6:.1f} MB JSON -> {len(gz) / 1e6:.1f} MB gzip "
         f"-> {len(b64) / 1e6:.1f} MB base64 ({len(df)} wydzieleń)")
+
+
+def check_static(cfg: dict, static: dict, grid: dict) -> None:
+    """Dane statyczne muszą pasować do siatki pogody i do reguł modelu w bieżącym configu."""
+    if static.get("siatka_podpis") != grid_signature(grid["wezly"]):
+        raise SystemExit("dane statyczne mapy i siatka pogody pochodzą z różnych przebiegów – "
+                         "uruchom pełny pipeline (nix run .#mapa)")
+    if static.get("model_podpis") != model_signature(cfg):
+        raise SystemExit("zmieniono reguły siedliskowe, wykluczenia, geometrię lub siatkę w config.yaml – "
+                         "uruchom pełny pipeline (nix run .#mapa)")
 
 
 def _species_meta(cfg: dict) -> list[dict]:
@@ -193,9 +205,9 @@ def render(cfg: dict, paths: Paths) -> None:
     static = read_json(paths.static_payload)
     weather = read_json(paths.weather_index)
     grid = read_json(paths.grid)
-    if static.get("siatka_podpis") != grid_signature(grid["wezly"]):
-        raise SystemExit("dane statyczne mapy i siatka pogody pochodzą z różnych przebiegów – "
-                         "uruchom pełny pipeline (nix run .#mapa)")
+    check_static(cfg, static, grid)
+    if weather.get("siatka_podpis") != grid_signature(grid["wezly"]):
+        raise SystemExit("wskaźnik pogody policzono dla innej siatki – uruchom nix run .#pogoda")
     gbif = read_json(paths.gbif_report) if paths.gbif_report.exists() else {"punkty": [], "gatunki": {}}
     meta = {
         "gatunki": _species_meta(cfg),

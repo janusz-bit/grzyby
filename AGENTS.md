@@ -16,9 +16,9 @@ i wnioski z rozpoznania danych są w `README.md`, a pierwotne wymagania w `PLAN.
   zależność dodaj do flake'a.
 - Komendy uruchamiaj w katalogu repo: kod czyta `config.yaml`, `dane.txt`, `data/` i `output/`
   względem bieżącego katalogu.
-  - `nix run .#mapa` lub `nix develop -c python -m grzyby` – pełny pipeline (~15 min na RPi 4)
-  - `nix run .#pogoda` lub `python -m grzyby pogoda` – tylko pogoda i HTML (~3–4 min, w tym
-    dławienie API); `--force` omija 3-godzinny cache
+  - `nix run .#mapa` lub `nix develop -c python -m grzyby` – pełny pipeline (czasy w README)
+  - `nix run .#pogoda` lub `python -m grzyby pogoda` – tylko pogoda i HTML (głównie dławienie
+    API Open-Meteo); `--force` omija 3-godzinny cache
   - `nix run .#zrzut` – test w headless Chromium: zrzuty, liczba wyrenderowanych wydzieleń,
     błędy JS, popup
   - pozostałe etapy: `python -m grzyby rozpoznanie|gbif|mapa|zrzut`
@@ -45,14 +45,17 @@ i wnioski z rozpoznania danych są w `README.md`, a pierwotne wymagania w `PLAN.
 
 - **Format payloadu**: `mapa.build_static` (Python) i funkcje `geojson()`/`popupHtml()` w
   `szablon.html` (JS) muszą zgadzać się co do kluczy w `D.f`: `geom`, `comp` (po 5 pól na wiersz
-  składu), `ws` (pary kod–udział ważony w %), `warn`, a na gatunek `p_`, `hs_`, `uf_`, `af_`, `hz_`
-  i `sf_` (×100, znaczenie opisuje docstring `habitat.host_scores`). Zmieniasz jedną stronę, zmień
+  składu), `ws` (pary kod–udział ważony w %), `warn`, `hgt` (×10), a na gatunek `p_`, `hs_`, `uf_`,
+  `af_`, `hz_` i `sf_` (×100, znaczenie opisuje docstring `habitat.host_scores`) oraz `dm_` (0/1,
+  reguła domieszki). Zmieniasz jedną stronę, zmień
   drugą. JS nie liczy modelu od nowa, tylko wyświetla liczby z Pythona.
 - **Szybkie odświeżenie pogody** (`etap pogoda`) nie może wczytywać `wydzielenia.gpkg`. Korzysta
   tylko z `data/work/mapa_statyczne.json` i `siatka_pogody.json`. Indeks węzła siatki (`g`)
   w payloadzie statycznym musi odpowiadać kolejności `wezly` w `siatka_pogody.json`. Pilnuje tego
-  `siatka_podpis` (sprawdzany w `mapa.render`), a w pełnym pipeline siatka i dane statyczne są
-  zapisywane przed krokami sieciowymi.
+  `siatka_podpis` (w danych statycznych i we wskaźniku pogody), a w pełnym pipeline siatka i dane
+  statyczne są zapisywane przed krokami sieciowymi. `model_podpis` (`common.model_signature`) wiąże
+  dane statyczne z sekcjami configu, z których powstały. Nowy parametr modelu, który wpływa na dane
+  statyczne, musi się w nim znaleźć.
 - **Kod wykluczenia 0 = dostępne**: `wykluczenia[0]` to pusty napis, a filtr warstw w JS zakłada
   `x == 0`.
 - **Wszystkie progi i reguły trzymaj w `config.yaml`**, nie w kodzie. Nowe parametry modelu opisuj

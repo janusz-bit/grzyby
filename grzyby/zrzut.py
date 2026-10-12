@@ -171,7 +171,8 @@ POPUP_JS = """(async () => {
   hits.sort((a, b) => b.p - a.p);
   const first = hits[0], second = hits.find(h => h.i !== first.i) || null;
   const el = document.elementFromPoint(first.x, first.y);
-  return {ok: true, x: first.x, y: first.y, i: first.i, second, cel: el ? el.className : null};
+  return {ok: true, x: first.x, y: first.y, i: first.i, second, cel: el ? el.className : null,
+          hits: hits.slice(0, 200)};
 })()"""
 
 
@@ -223,6 +224,13 @@ def run(cfg: dict, paths: Paths, timeout_s: float = 600, center=(23.62, 52.73)) 
                     dt.wait_for("!!document.querySelector('.maplibregl-popup-content')", 30, step=1)
                     time.sleep(1)
                     first_text = dt.eval(popup_text)
+                    # cel nie może leżeć pod otwartym popupem – wtedy najlepsze trafienie spoza niego
+                    free = dt.eval("""(hits => {
+                      const r = document.querySelector('.maplibregl-popup').getBoundingClientRect();
+                      return hits.find(h => h.i !== %d && (h.x < r.left || h.x > r.right || h.y < r.top || h.y > r.bottom)) || null;
+                    })(%s)""" % (second["i"], json.dumps(target["hits"])))
+                    if free:
+                        target = {**target, **free}
                 click(dt, target["x"], target["y"])
                 dt.wait_for("!!document.querySelector('.maplibregl-popup-content')", 30, step=1)
                 time.sleep(2)

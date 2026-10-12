@@ -37,6 +37,8 @@ drzewostan:
   # Piętra, w których obecność żywiciela (nawet MJS/PJD) liczy się jako „domieszka”
   # dla gatunków z parametrem `min_obecnosc`.
   pietra_domieszki: [DRZEW, IP, IIP]
+  # Piętro górne – z niego liczony jest wiek/gatunek panujący i wysokość do reguły uprawy.
+  pietra_gorne: [DRZEW, IP]
   czynnik_wieku_brak: 0.5  # gdy BDL nie podaje wieku gatunku
 
 # Czynnik siedliska, gdy kodu siedliska nie ma w tabeli danego gatunku grzyba.
@@ -47,9 +49,9 @@ domyslny_czynnik_siedliska: 0.4
 #             kod (np. DB.C), potem rodzaj przed kropką (DB.S -> DB).
 # nasycenie:  ważony udział żywicieli (0–1), przy którym czynnik udziału = 1;
 #             mała wartość = wystarczy domieszka.
-# min_obecnosc: (opcjonalnie) minimalny czynnik udziału, gdy żywiciel występuje
-#             w piętrach `pietra_domieszki` choćby pojedynczo (MJS/PJD) – reguła
-#             „także jako domieszka”.
+# min_obecnosc: (opcjonalnie) reguła „także jako domieszka”: gdy żywiciel występuje
+#             w piętrach `pietra_domieszki` choćby pojedynczo (MJS/PJD), czynnik udziału
+#             wynosi co najmniej min_obecnosc × waga tego żywiciela (np. TP 0,5 → 0,2).
 # wiek:       krzywa [wiek_lat, czynnik] liczona dla wieku konkretnego żywiciela;
 #             mnoży czynnik udziału (czysty drzewostan żywiciela = sama krzywa wieku).
 # siedliska:  kod typu siedliskowego -> czynnik (0–1).
@@ -255,10 +257,12 @@ wykluczenia:
   rodzaje_powierzchni:
     PLANT NAS: plantacja nasienna – zakaz wstępu (baza nasienna, zwykle ogrodzona)
     SZK LEŚNA: szkółka leśna – teren ogrodzony
-  # Uprawa: średnia wysokość piętra górnego (DRZEW/IP) ważona udziałami <= próg.
-  # Gdy BDL nie podaje wysokości – wiek gatunku panującego < próg wieku.
+  # Uprawa: średnia wysokość piętra górnego (pietra_gorne) ważona udziałami <= próg.
+  # Gatunkom młodszym niż uprawa_max_wiek_lat bez wysokości w BDL przypisujemy
+  # uprawa_wysokosc_brak_m. Gdy w ogóle brak wysokości – wiek gatunku panującego < próg wieku.
   uprawa_max_wysokosc_m: 4
   uprawa_max_wiek_lat: 10
+  uprawa_wysokosc_brak_m: 1.0
   # Powierzchnie nieleśne: rodzaj powierzchni z flagą type_fl = 'N' w słowniku
   # f_area_type_dic (grunty rolne, wody, zabudowa, bagna, zadrzewienia...).
   nielesne_flaga: N
@@ -280,7 +284,7 @@ pogoda:
   zmienne_dzienne: [precipitation_sum, temperature_2m_min, temperature_2m_mean]
   wilgotnosc_gleby: soil_moisture_3_to_9cm   # zmienna godzinowa, uśredniana do doby; null = wyłącz
   punktow_na_zapytanie: 50
-  limit_wywolan_na_minute: 400   # darmowe API: 600/min, 5000/h, 10000/dobę
+  limit_wywolan_na_minute: 550   # darmowe API: 600/min, 5000/h, 10000/dobę
   cache_godzin: 3                # ponowne uruchomienie w tym czasie nie pobiera danych
 
   opady:
@@ -308,9 +312,10 @@ gbif:
   url: https://api.gbif.org/v1
   bufor_km: 10                 # zasięg wyszukiwania wokół nadleśnictw
   max_na_takson: 3000
-  max_niepewnosc_m: 1000       # odrzuć obserwacje z większą niepewnością położenia
+  max_niepewnosc_m: 1000       # obserwacje z większą niepewnością położenia pomijane (statystyki i mapa)
   dopasowanie_m: 200           # punkt poza wydzieleniem: weź najbliższe wydzielenie leśne w tym promieniu
   prog_wysoki: 0.5             # „wysoki potencjał siedliskowy”
+  min_proba: 10                # poniżej tylu dopasowanych obserwacji raport ustawia flagę mala_proba
 
 # --- Mapa --------------------------------------------------------------------
 mapa:

@@ -26,7 +26,7 @@ Raport generowany automatycznie (`python -m grzyby rozpoznanie`).
 
 ## Układ współrzędnych i kodowanie
 
-- `.prj`: `ETRS_1989_Poland_CS92` (pyproj: ETRF2000-PL / CS92) → EPSG:2180, parametry identyczne z EPSG:2180 (16 paczek)
+- `.prj`: `ETRS_1989_Poland_CS92` (pyproj: ETRS89 / PL-1992) → EPSG:2180, parametry identyczne z EPSG:2180 (16 paczek)
 - pliki tekstowe: kodowanie `utf-8` (64 plików sprawdzonych)
 - kolumny `G_SUBAREA`: `a_i_num`, `adr_for`, `area_type`, `site_type`, `silvicult`, `forest_fun`, `stand_stru`, `rotat_age`, `sub_area`, `prot_categ`, `species_cd`, `part_cd`, `spec_age`, `a_year`, `geometry`
 

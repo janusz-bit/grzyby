@@ -78,18 +78,26 @@ def host_scores(ss: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         out[f"uf_{key}"] = uf
         out[f"af_{key}"] = af
         out[f"hz_{key}"] = uf * af
+        # 1 = czynnik udziału podniesiony regułą domieszki (do opisu w popupie)
+        out[f"dm_{key}"] = (uf > (hs / sp["nasycenie"]).clip(upper=1.0) + 1e-9).astype(int)
     return pd.DataFrame(out)
 
 
 def stand_summary(ss: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """Wiek/wysokość piętra górnego, zwarty zapis składu i ważone udziały gatunków."""
-    top = ss[ss["storey_cd"].isin(["DRZEW", "IP"])]
+    ex = cfg["wykluczenia"]
+    top = ss[ss["storey_cd"].isin(cfg["drzewostan"]["pietra_gorne"])]
     g = top.groupby("arodes_int_num")
     # wysokość drzewostanu = średnia wysokość gatunków piętra górnego ważona udziałami
-    # (maksimum dawałoby 10% domieszki szybko rosnącej brzozy nad młodą uprawą)
-    hh = top[top["height_m"].notna()]
-    top_height = (hh["share"] * hh["height_m"]).groupby(hh["arodes_int_num"]).sum() / \
-        hh["share"].groupby(hh["arodes_int_num"]).sum()
+    # (maksimum dawałoby 10% domieszki szybko rosnącej brzozy nad młodą uprawą). BDL nie podaje
+    # wysokości głównie 2–5-letnich drzewek – dla gatunków młodszych niż uprawa_max_wiek_lat
+    # przyjmujemy wtedy uprawa_wysokosc_brak_m.
+    h = top["height_m"].mask(top["height_m"].isna() & (top["age"] < ex["uprawa_max_wiek_lat"]),
+                             ex["uprawa_wysokosc_brak_m"])
+    has_h = h.notna()
+    ids_h = top.loc[has_h, "arodes_int_num"]
+    top_height = ((top.loc[has_h, "share"] * h[has_h]).groupby(ids_h).sum()
+                  / top.loc[has_h, "share"].groupby(ids_h).sum()).round(1)
     # indeks = wszystkie wydzielenia ze składem (także zręby/sukcesje bez piętra DRZEW/IP)
     summary = pd.DataFrame(index=pd.Index(ss["arodes_int_num"].unique(), name="arodes_int_num"))
     summary["top_age"] = g["age"].max()
@@ -187,8 +195,8 @@ def build(cfg: dict, paths: Paths) -> gpd.GeoDataFrame:
     parts = [load_package(p, cfg) for p in open_packages(cfg, paths)]
     gdf = pd.concat(parts, ignore_index=True)
     gdf = gpd.GeoDataFrame(gdf, geometry="geometry", crs=parts[0].crs)
-    # .prj w BDL to ESRI-owy opis CS92 (pyproj rozpoznaje go jako EPSG:2180 tylko przy niższej
-    # pewności) – po sprawdzeniu parametrów ustawiamy kanoniczny kod EPSG.
+    # .prj w BDL to ESRI-owy opis CS92 (zależnie od wersji PROJ rozpoznawany jako EPSG:2180
+    # albo bez kodu EPSG) – po sprawdzeniu parametrów ustawiamy kanoniczny kod EPSG.
     target = CRS.from_user_input(cfg["dane"]["crs"])
     if gdf.crs is None or not same_projection(gdf.crs, target):
         raise RuntimeError(f"nieoczekiwany układ współrzędnych warstwy: {gdf.crs}")
