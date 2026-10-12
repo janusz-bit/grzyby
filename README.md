@@ -39,8 +39,8 @@ python -m grzyby mapa         # przebudowa HTML z danych pośrednich
 python -m grzyby zrzut        # wymaga chromium w PATH
 ```
 
-Orientacyjne czasy na Raspberry Pi 4: pełny pipeline ok. 7 min z pogodą z cache i ok. 11 min
-ze świeżą, `pogoda` ok. 3–4 min. Prawie cały czas `pogoda` to dławienie do
+Orientacyjne czasy na Raspberry Pi 4: pełny pipeline ok. 7–9 min z pogodą z cache i ok. 10–12 min
+ze świeżą, `pogoda` ok. 3 min. Prawie cały czas `pogoda` to dławienie do
 `limit_wywolan_na_minute` = 550, czyli tuż poniżej limitu darmowego API Open-Meteo
 (600 wywołań/min). Każda z 575 lokalizacji z 38 dniami danych liczy się jako ok. 2,7 wywołania. Na zwykłym PC całość jest kilka
 razy szybsza. Mapę otwiera się bezpośrednio z dysku (`file://…/output/mapa.html`). Potrzebny jest
